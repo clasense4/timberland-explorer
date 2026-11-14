@@ -1,0 +1,6 @@
+{
+  "name": "Timberland Monster Truck Explorer",
+  "description": "An open-world 3D mountain forest monster truck exploration game built with Three.js and WebGL.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
