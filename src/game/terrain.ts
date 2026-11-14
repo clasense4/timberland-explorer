@@ -2,22 +2,27 @@ import * as THREE from 'three';
 import type { BridgeSpec, RampSpec } from './types';
 import type { ProceduralTextureSet } from './textures';
 
-export const WORLD_RADIUS = 195;
-export const TERRAIN_SIZE = 540;
+export const WORLD_RADIUS = 400;
+export const TERRAIN_SIZE = 1120;
 export const WATER_LEVEL = -0.45;
 
 export const RAMPS: RampSpec[] = [
-  { x: 18, z: -26, yaw: 0.28, width: 7.5, length: 13, height: 2.8 },
-  { x: 56, z: -56, yaw: -0.7, width: 8.5, length: 14, height: 3.3 },
-  { x: 74, z: -38, yaw: 2.3, width: 8.0, length: 13, height: 3.0 },
-  { x: -34, z: 38, yaw: 1.05, width: 7.5, length: 13, height: 2.6 },
-  { x: -82, z: -18, yaw: -0.4, width: 8.0, length: 14, height: 3.1 },
-  { x: 12, z: 76, yaw: 1.7, width: 8.0, length: 13, height: 2.9 },
+  { x: 22, z: -32, yaw: 0.28, width: 8.0, length: 13, height: 2.8 },
+  { x: 88, z: -96, yaw: -0.7, width: 9.0, length: 14, height: 3.4 },
+  { x: 132, z: -58, yaw: 2.3, width: 8.5, length: 14, height: 3.1 },
+  { x: -64, z: 72, yaw: 1.05, width: 8.0, length: 13, height: 2.8 },
+  { x: -165, z: -36, yaw: -0.4, width: 8.5, length: 14, height: 3.2 },
+  { x: 24, z: 156, yaw: 1.7, width: 8.5, length: 14, height: 3.0 },
+  { x: 210, z: 95, yaw: -1.1, width: 9.0, length: 15, height: 3.5 },
+  { x: -195, z: 165, yaw: 0.65, width: 8.5, length: 14, height: 3.2 },
+  { x: 45, z: -245, yaw: 2.8, width: 9.0, length: 15, height: 3.4 },
+  { x: -240, z: -140, yaw: -0.95, width: 8.5, length: 14, height: 3.1 },
 ];
 
 export const BRIDGES: BridgeSpec[] = [
-  { x: -8, z: -48, yaw: 0.15, width: 8.5, length: 24, deckHeight: 0.85 },
-  { x: 68, z: 22, yaw: -0.82, width: 8.5, length: 24, deckHeight: 0.85 },
+  { x: -16, z: -86, yaw: 0.15, width: 9.0, length: 28, deckHeight: 0.9 },
+  { x: 135, z: -48, yaw: -0.68, width: 9.0, length: 28, deckHeight: 0.9 },
+  { x: -190, z: -98, yaw: 0.32, width: 9.0, length: 28, deckHeight: 0.9 },
 ];
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -26,77 +31,92 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 /**
- * Computes the meandering alpine creek centerline X for a given Z,
- * plus an east fork so the creek winds naturally across the valley.
+ * Computes distance to the wide meandering alpine creek and pond.
  */
 export function creekSignedDistance(x: number, z: number): number {
-  const curveZ = -48 + Math.sin(x * 0.022) * 18 + Math.cos(x * 0.045) * 6;
+  const curveZ = -88 + Math.sin(x * 0.014) * 32 + Math.cos(x * 0.028) * 11;
   const dMain = Math.abs(z - curveZ);
-  // Pond expansion near x = 28, z = -34
-  const pondDist = Math.hypot(x - 32, z + 38) - 14;
-  return Math.min(dMain, pondDist + 8);
+  // Alpine lake near (64, -74)
+  const pondDist = Math.hypot(x - 64, z + 74) - 22;
+  // Second mountain tarn near (-145, -108)
+  const tarnDist = Math.hypot(x + 145, z + 108) - 18;
+  return Math.min(dMain, pondDist + 8, tarnDist + 8);
 }
 
 /**
- * Returns 0..1 indicating proximity to the main scenic dirt exploration loop.
+ * Returns 0..1 indicating proximity to the sprawling dirt exploration loop trails.
  */
 export function trailFactorAt(x: number, z: number): number {
-  const rx = x / 76;
-  const rz = z / 68;
+  const rx = x / 165;
+  const rz = z / 150;
   const angle = Math.atan2(rz, rx);
-  const targetR = 1.0 + 0.14 * Math.sin(angle * 3.0 + 0.4);
+  const targetR = 1.0 + 0.16 * Math.sin(angle * 3.0 + 0.4);
   const r = Math.hypot(rx, rz);
-  const distToLoop = Math.abs(r - targetR) * 72;
+  const distToOuterLoop = Math.abs(r - targetR) * 145;
 
-  // Plus a central meadow connector through spawn (0, 0)
-  const distToCenterRoad = Math.abs(x * 0.85 + z * 0.52) < 90 ? Math.abs(x * 0.52 - z * 0.85) : 999;
-  const d = Math.min(distToLoop, distToCenterRoad);
-  return 1 - smoothstep(3.2, 8.8, d);
+  // Inner meadow loop
+  const ir = Math.hypot(x / 72, z / 68);
+  const distToInnerLoop = Math.abs(ir - 1.0) * 68;
+
+  // Central meadow connector through spawn (0, 0)
+  const distToCenterRoad =
+    Math.abs(x * 0.85 + z * 0.52) < 180 ? Math.abs(x * 0.52 - z * 0.85) : 999;
+
+  const d = Math.min(distToOuterLoop, distToInnerLoop, distToCenterRoad);
+  return 1 - smoothstep(3.5, 9.5, d);
 }
 
 /**
- * Pure analytical terrain heightfield (no ramps/bridges).
- * Used for rendering terrain mesh and checking ground base elevation.
+ * Pure analytical terrain heightfield for the expansive mountain forest valley.
  */
 export function groundHeightAt(x: number, z: number): number {
-  // Spawn clearing is gently level
   const spawnDist = Math.hypot(x, z);
-  const spawnFlatten = smoothstep(10, 34, spawnDist);
+  const spawnFlatten = smoothstep(14, 42, spawnDist);
 
-  // Rolling forest hills
+  // Broad rolling forest hills
   const rolling =
-    Math.sin(x * 0.028) * Math.cos(z * 0.024) * 3.4 +
-    Math.sin(x * 0.062 + 1.1) * Math.sin(z * 0.055) * 1.35 +
-    Math.cos((x + z) * 0.015) * 2.2;
+    Math.sin(x * 0.016) * Math.cos(z * 0.015) * 4.8 +
+    Math.sin(x * 0.038 + 1.1) * Math.sin(z * 0.034) * 2.1 +
+    Math.cos((x + z) * 0.009) * 3.2;
 
-  // Scenic Lookout Hill in the northwest quadrant
-  const hillDist = Math.hypot(x + 76, z + 76);
-  const lookoutHill = Math.max(0, 1 - smoothstep(10, 56, hillDist)) * 13.5;
+  // Lookout Peak in the northwest quadrant
+  const hillDist = Math.hypot(x + 150, z + 150);
+  const lookoutHill = Math.max(0, 1 - smoothstep(14, 88, hillDist)) * 18.5;
 
   // Pine Ridge in the southeast
-  const ridgeDist = Math.hypot(x - 96, z - 86);
-  const pineRidge = Math.max(0, 1 - smoothstep(12, 62, ridgeDist)) * 11.0;
+  const ridgeDist = Math.hypot(x - 195, z - 175);
+  const pineRidge = Math.max(0, 1 - smoothstep(16, 98, ridgeDist)) * 16.0;
 
   // Southern Sunny Knoll
-  const knollDist = Math.hypot(x + 28, z - 92);
-  const sunnyKnoll = Math.max(0, 1 - smoothstep(8, 46, knollDist)) * 7.5;
+  const knollDist = Math.hypot(x + 62, z - 195);
+  const sunnyKnoll = Math.max(0, 1 - smoothstep(12, 76, knollDist)) * 12.5;
 
-  // Natural mountain perimeter surrounding the open valley
+  // Northeast Cedar Summit
+  const cedarDist = Math.hypot(x - 210, z + 165);
+  const cedarSummit = Math.max(0, 1 - smoothstep(15, 86, cedarDist)) * 15.0;
+
+  // Towering mountain perimeter surrounding the valley
   const r = Math.hypot(x, z);
-  const rimT = smoothstep(145, 255, r);
+  const rimT = smoothstep(330, 520, r);
   const mountainNoise =
-    0.72 +
-    0.28 * Math.sin(Math.atan2(z, x) * 7.0 + 0.5) +
-    0.16 * Math.cos(Math.atan2(z, x) * 13.0);
-  const mountainRim = rimT * rimT * 46 * mountainNoise;
+    0.74 +
+    0.26 * Math.sin(Math.atan2(z, x) * 7.0 + 0.5) +
+    0.18 * Math.cos(Math.atan2(z, x) * 13.0);
+  const mountainRim = rimT * rimT * 74 * mountainNoise;
 
-  let h = rolling * spawnFlatten + lookoutHill + pineRidge + sunnyKnoll + mountainRim;
+  let h =
+    rolling * spawnFlatten +
+    lookoutHill +
+    pineRidge +
+    sunnyKnoll +
+    cedarSummit +
+    mountainRim;
 
-  // Carve gentle creek bed & alpine pond
+  // Carve gentle creek bed & alpine ponds
   const creekD = creekSignedDistance(x, z);
-  const creekCarve = 1 - smoothstep(5.5, 15.0, creekD);
+  const creekCarve = 1 - smoothstep(6.0, 16.5, creekD);
   if (creekCarve > 0) {
-    const targetBed = -1.15;
+    const targetBed = -1.2;
     h = THREE.MathUtils.lerp(h, Math.min(h, targetBed), creekCarve);
   }
 
@@ -109,7 +129,6 @@ export function groundHeightAt(x: number, z: number): number {
 export function surfaceHeightAt(x: number, z: number): number {
   let h = groundHeightAt(x, z);
 
-  // Check wooden ramps
   for (let i = 0; i < RAMPS.length; i++) {
     const ramp = RAMPS[i];
     const dx = x - ramp.x;
@@ -122,7 +141,6 @@ export function surfaceHeightAt(x: number, z: number): number {
     const halfW = ramp.width * 0.5;
     const halfL = ramp.length * 0.5;
     if (Math.abs(lx) <= halfW && Math.abs(lz) <= halfL) {
-      // lz goes from -halfL (entry) to +halfL (lip)
       const t = (lz + halfL) / ramp.length;
       const baseH = groundHeightAt(ramp.x, ramp.z);
       const rampSurface = baseH + Math.pow(t, 1.18) * ramp.height;
@@ -132,7 +150,6 @@ export function surfaceHeightAt(x: number, z: number): number {
     }
   }
 
-  // Check wooden log bridges
   for (let i = 0; i < BRIDGES.length; i++) {
     const br = BRIDGES[i];
     const dx = x - br.x;
@@ -145,9 +162,8 @@ export function surfaceHeightAt(x: number, z: number): number {
     const halfW = br.width * 0.5;
     const halfL = br.length * 0.5;
     if (Math.abs(lx) <= halfW && Math.abs(lz) <= halfL) {
-      // Arched bridge deck
-      const normZ = lz / halfL; // -1 to +1
-      const arch = (1 - normZ * normZ) * 1.15;
+      const normZ = lz / halfL;
+      const arch = (1 - normZ * normZ) * 1.25;
       const deckY = br.deckHeight + arch;
       if (deckY > h) {
         h = deckY;
@@ -160,11 +176,13 @@ export function surfaceHeightAt(x: number, z: number): number {
 
 export function getZoneNameAt(x: number, z: number): string {
   if (groundHeightAt(x, z) < WATER_LEVEL + 0.08) return 'Crystal Creek';
-  if (Math.hypot(x + 76, z + 76) < 42) return 'Lookout Peak';
-  if (Math.hypot(x - 62, z + 48) < 40) return 'Jump Meadow';
-  if (Math.hypot(x - 96, z - 86) < 46) return 'Whispering Pines';
-  if (Math.hypot(x, z) < 28) return 'Sunny Clearing';
-  if (Math.hypot(x, z) > 148) return 'Alpine Foothills';
+  if (Math.hypot(x + 150, z + 150) < 70) return 'Lookout Peak';
+  if (Math.hypot(x - 110, z + 78) < 64) return 'Jump Meadow';
+  if (Math.hypot(x - 195, z - 175) < 76) return 'Whispering Pines';
+  if (Math.hypot(x - 210, z + 165) < 68) return 'Cedar Summit';
+  if (Math.hypot(x + 62, z - 195) < 60) return 'Sunny Knoll';
+  if (Math.hypot(x, z) < 38) return 'Base Clearing';
+  if (Math.hypot(x, z) > 315) return 'Alpine Foothills';
   return 'Timberland Valley';
 }
 
@@ -175,8 +193,7 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
 } {
   const group = new THREE.Group();
 
-  // 1. Subdivided vertex-colored terrain mesh
-  const segments = 210;
+  const segments = 240;
   const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
@@ -196,44 +213,37 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
     const h = groundHeightAt(x, z);
     pos.setY(i, h);
 
-    // Determine surface biome color
     const trail = trailFactorAt(x, z);
     const creekD = creekSignedDistance(x, z);
     const r = Math.hypot(x, z);
 
-    // Base meadow-to-pine noise
-    const forestPatch = 0.5 + 0.5 * Math.sin(x * 0.045) * Math.cos(z * 0.045);
+    const forestPatch = 0.5 + 0.5 * Math.sin(x * 0.025) * Math.cos(z * 0.025);
     tmpColor.copy(cMeadow).lerp(cPineFloor, forestPatch * 0.72);
 
-    // Dirt trail blend
     if (trail > 0.02) {
       tmpColor.lerp(cDirtTrail, trail * 0.88);
     }
 
-    // Creek bank sandy pebbles
     if (h < WATER_LEVEL + 0.65) {
       const bankT = 1 - smoothstep(WATER_LEVEL - 0.5, WATER_LEVEL + 0.65, h);
       tmpColor.lerp(cSand, bankT * 0.85);
     }
 
-    // Rocky mountain slopes & snow peaks
-    if (h > 9.5 || r > 158) {
-      const rockT = smoothstep(9.5, 19.0, h);
+    if (h > 13.5 || r > 345) {
+      const rockT = smoothstep(13.5, 25.0, h);
       tmpColor.lerp(cRock, rockT * 0.9);
     }
-    if (h > 22.0) {
-      const snowT = smoothstep(22.0, 32.0, h);
+    if (h > 28.0) {
+      const snowT = smoothstep(28.0, 42.0, h);
       tmpColor.lerp(cSnow, snowT * 0.92);
     }
 
-    // Subtle organic variation
-    const micro = (Math.sin(x * 0.37) * Math.cos(z * 0.41)) * 0.035;
+    const micro = Math.sin(x * 0.25) * Math.cos(z * 0.28) * 0.035;
     colors[i * 3] = Math.min(1, Math.max(0, tmpColor.r + micro));
     colors[i * 3 + 1] = Math.min(1, Math.max(0, tmpColor.g + micro));
     colors[i * 3 + 2] = Math.min(1, Math.max(0, tmpColor.b + micro));
 
-    // Keep creek bed slightly darker underwater
-    if (creekD < 6 && h < WATER_LEVEL) {
+    if (creekD < 7 && h < WATER_LEVEL) {
       colors[i * 3] *= 0.82;
       colors[i * 3 + 1] *= 0.86;
       colors[i * 3 + 2] *= 0.88;
@@ -242,6 +252,9 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
 
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
+
+  // Repeat detail texture cleanly across larger world
+  textures.terrainDetailMap.repeat.set(72, 72);
 
   const terrainMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -254,8 +267,8 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
   terrainMesh.receiveShadow = true;
   group.add(terrainMesh);
 
-  // 2. Shimmering alpine creek water surface
-  const waterGeo = new THREE.PlaneGeometry(360, 170, 48, 24);
+  // Expanded creek water surface across the larger valley
+  const waterGeo = new THREE.PlaneGeometry(820, 260, 64, 32);
   waterGeo.rotateX(-Math.PI / 2);
   const waterMat = new THREE.MeshPhysicalMaterial({
     color: 0x3ba6c4,
@@ -267,11 +280,11 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
     opacity: 0.78,
   });
   const waterMesh = new THREE.Mesh(waterGeo, waterMat);
-  waterMesh.position.set(15, WATER_LEVEL, -46);
+  waterMesh.position.set(0, WATER_LEVEL, -88);
   waterMesh.receiveShadow = true;
   group.add(waterMesh);
 
-  // 3. Build wooden stunt ramps
+  // Wooden stunt ramps
   const woodMat = new THREE.MeshStandardMaterial({
     map: textures.woodPlankMap,
     color: 0xd4a373,
@@ -297,7 +310,6 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
     rGroup.position.set(ramp.x, baseH, ramp.z);
     rGroup.rotation.y = ramp.yaw;
 
-    // Wedge profile extruded across ramp width
     const shape = new THREE.Shape();
     const halfL = ramp.length * 0.5;
     shape.moveTo(-halfL, -0.35);
@@ -322,7 +334,6 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
     wedge.receiveShadow = true;
     rGroup.add(wedge);
 
-    // Side safety rails & yellow chevron lip strip
     const lipGeo = new THREE.BoxGeometry(ramp.width - 0.3, 0.14, 0.55);
     rampGeos.push(lipGeo);
     const lip = new THREE.Mesh(lipGeo, stripeMat);
@@ -341,13 +352,13 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
     group.add(rGroup);
   });
 
-  // 4. Build arched wooden log bridges across the creek
+  // Arched wooden log bridges across the creek
   BRIDGES.forEach((br) => {
     const bGroup = new THREE.Group();
     bGroup.position.set(br.x, 0, br.z);
     bGroup.rotation.y = br.yaw;
 
-    const plankCount = 18;
+    const plankCount = 20;
     const plankLen = br.length / plankCount;
     const plankGeo = new THREE.BoxGeometry(br.width, 0.32, plankLen * 0.88);
     rampGeos.push(plankGeo);
@@ -355,7 +366,7 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
     for (let i = 0; i < plankCount; i++) {
       const lz = -br.length * 0.5 + (i + 0.5) * plankLen;
       const normZ = lz / (br.length * 0.5);
-      const arch = (1 - normZ * normZ) * 1.15;
+      const arch = (1 - normZ * normZ) * 1.25;
       const plank = new THREE.Mesh(plankGeo, woodMat);
       plank.position.set(0, br.deckHeight + arch - 0.16, lz);
       plank.castShadow = true;
@@ -363,14 +374,13 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
       bGroup.add(plank);
     }
 
-    // Bridge side guard beams + posts
     const postGeo = new THREE.CylinderGeometry(0.2, 0.22, 2.2, 8);
     rampGeos.push(postGeo);
     [-br.width * 0.48, br.width * 0.48].forEach((sx) => {
       for (let p = -2; p <= 2; p++) {
         const pz = p * (br.length * 0.22);
         const normZ = pz / (br.length * 0.5);
-        const arch = (1 - normZ * normZ) * 1.15;
+        const arch = (1 - normZ * normZ) * 1.25;
         const post = new THREE.Mesh(postGeo, braceMat);
         post.position.set(sx, br.deckHeight + arch + 0.3, pz);
         post.castShadow = true;

@@ -19,9 +19,11 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [hud, setHud] = useState<HudSnapshot>({
     speedKmh: 0,
+    rpm: 850,
+    gear: 1,
     starsCollected: 0,
     totalStars: 12,
-    zoneName: 'Sunny Clearing',
+    zoneName: 'Base Clearing',
     inWater: false,
     airborne: false,
     webglLost: false,
@@ -97,6 +99,10 @@ export default function App() {
     engineRef.current?.setCameraMode(mode);
   }, []);
 
+  const handleRecenterCamera = useCallback(() => {
+    engineRef.current?.recenterCamera();
+  }, []);
+
   const handleToggleMute = useCallback(() => {
     setMuted((prev) => {
       const next = !prev;
@@ -151,6 +157,7 @@ export default function App() {
         onSelectColor={handleSelectColor}
         onSelectTimeOfDay={handleSelectTime}
         onSelectCamera={handleSelectCamera}
+        onRecenterCamera={handleRecenterCamera}
         onToggleMute={handleToggleMute}
         onHonk={handleHonk}
         onReset={handleReset}

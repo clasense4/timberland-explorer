@@ -29,6 +29,8 @@ export interface InputState {
 
 export interface HudSnapshot {
   speedKmh: number;
+  rpm: number;
+  gear: number;
   starsCollected: number;
   totalStars: number;
   zoneName: string;

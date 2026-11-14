@@ -3,8 +3,10 @@ import {
   BRIDGES,
   RAMPS,
   WATER_LEVEL,
+  WORLD_RADIUS,
   creekSignedDistance,
   groundHeightAt,
+  surfaceHeightAt,
   trailFactorAt,
 } from './terrain';
 import type { ProceduralTextureSet } from './textures';
@@ -23,11 +25,12 @@ export interface WorldPropsRig {
   group: THREE.Group;
   obstacles: ObstacleCircle[];
   stars: CollectibleStar[];
+  randomizeStars: () => void;
+  getRandomSafeSpot: (minRadius?: number, maxRadius?: number) => { x: number; y: number; z: number; yaw: number };
   update: (elapsed: number, dt: number, isStarlight: boolean) => void;
   dispose: () => void;
 }
 
-// Deterministic seeded PRNG so the forest layout is consistently lush & well-placed
 function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {
@@ -40,19 +43,14 @@ function mulberry32(seed: number): () => number {
 }
 
 function isNearFeature(x: number, z: number): boolean {
-  // Keep spawn clearing wide open
-  if (Math.hypot(x, z) < 22) return true;
-  // Keep lookout cabin clearing open
-  if (Math.hypot(x + 76, z + 76) < 16) return true;
-  // Keep trails clear
+  if (Math.hypot(x, z) < 28) return true;
+  if (Math.hypot(x + 150, z + 150) < 20) return true;
   if (trailFactorAt(x, z) > 0.25) return true;
-  // Keep ramps clear
   for (const r of RAMPS) {
-    if (Math.hypot(x - r.x, z - r.z) < 14) return true;
+    if (Math.hypot(x - r.x, z - r.z) < 16) return true;
   }
-  // Keep bridges clear
   for (const b of BRIDGES) {
-    if (Math.hypot(x - b.x, z - b.z) < 18) return true;
+    if (Math.hypot(x - b.x, z - b.z) < 22) return true;
   }
   return false;
 }
@@ -75,20 +73,20 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
   const rand = mulberry32(20261114);
 
   // =========================================================================
-  // 1. Multi-Tier Pine Trees (InstancedMesh: Trunk + 3 Foliage Cones)
+  // 1. Multi-Tier Pine Trees across expanded valley
   // =========================================================================
-  const PINE_COUNT = 380;
-  const pineTrunkGeo = trackGeo(new THREE.CylinderGeometry(0.32, 0.52, 4.2, 7));
-  pineTrunkGeo.translate(0, 2.1, 0);
+  const PINE_COUNT = 820;
+  const pineTrunkGeo = trackGeo(new THREE.CylinderGeometry(0.32, 0.54, 4.4, 7));
+  pineTrunkGeo.translate(0, 2.2, 0);
 
-  const pineTier1Geo = trackGeo(new THREE.ConeGeometry(2.6, 4.4, 8));
-  pineTier1Geo.translate(0, 4.6, 0);
+  const pineTier1Geo = trackGeo(new THREE.ConeGeometry(2.7, 4.6, 8));
+  pineTier1Geo.translate(0, 4.8, 0);
 
-  const pineTier2Geo = trackGeo(new THREE.ConeGeometry(2.1, 3.8, 8));
-  pineTier2Geo.translate(0, 6.8, 0);
+  const pineTier2Geo = trackGeo(new THREE.ConeGeometry(2.15, 4.0, 8));
+  pineTier2Geo.translate(0, 7.1, 0);
 
-  const pineTier3Geo = trackGeo(new THREE.ConeGeometry(1.45, 3.2, 8));
-  pineTier3Geo.translate(0, 8.8, 0);
+  const pineTier3Geo = trackGeo(new THREE.ConeGeometry(1.5, 3.3, 8));
+  pineTier3Geo.translate(0, 9.2, 0);
 
   const trunkMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -122,19 +120,19 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
   let placedPines = 0;
   let attempts = 0;
 
-  while (placedPines < PINE_COUNT && attempts < 4000) {
+  while (placedPines < PINE_COUNT && attempts < 9000) {
     attempts++;
     const angle = rand() * Math.PI * 2;
-    const dist = 24 + Math.sqrt(rand()) * 170;
+    const dist = 30 + Math.sqrt(rand()) * 360;
     const x = Math.cos(angle) * dist;
     const z = Math.sin(angle) * dist;
 
     if (isNearFeature(x, z)) continue;
-    if (creekSignedDistance(x, z) < 11) continue;
+    if (creekSignedDistance(x, z) < 12) continue;
     const y = groundHeightAt(x, z);
-    if (y < WATER_LEVEL + 0.5 || y > 24) continue;
+    if (y < WATER_LEVEL + 0.5 || y > 30) continue;
 
-    const scale = 0.78 + rand() * 0.62; // +-15%+ organic scale variety
+    const scale = 0.8 + rand() * 0.68;
     dummy.position.set(x, y - 0.15, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
     dummy.scale.set(scale, scale * (0.9 + rand() * 0.25), scale);
@@ -145,18 +143,16 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
     pineT2.setMatrixAt(placedPines, dummy.matrix);
     pineT3.setMatrixAt(placedPines, dummy.matrix);
 
-    // Rich forest spruce-to-pine hue shift
-    const g = 0.36 + rand() * 0.16;
-    colorTmp.setRGB(0.11 + rand() * 0.06, g, 0.16 + rand() * 0.08);
+    const g = 0.28 + rand() * 0.15;
+    colorTmp.setRGB(0.08 + rand() * 0.05, g, 0.12 + rand() * 0.06, THREE.SRGBColorSpace);
     pineT1.setColorAt(placedPines, colorTmp);
-    colorTmp.offsetHSL(0, 0.02, 0.03);
+    colorTmp.offsetHSL(0, 0.02, 0.025);
     pineT2.setColorAt(placedPines, colorTmp);
-    colorTmp.offsetHSL(0, 0.02, 0.04);
+    colorTmp.offsetHSL(0, 0.02, 0.03);
     pineT3.setColorAt(placedPines, colorTmp);
 
-    // Gentle tree-trunk push radius (soft deflection, never traps truck)
-    if (dist < 165) {
-      obstacles.push({ x, z, radius: 1.05 * scale });
+    if (dist < WORLD_RADIUS - 20) {
+      obstacles.push({ x, z, radius: 1.0 * scale });
     }
     placedPines++;
   }
@@ -172,11 +168,11 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
   // =========================================================================
   // 2. Meadow Birch / Aspen Trees along Creek Banks & Clearings
   // =========================================================================
-  const BIRCH_COUNT = 75;
+  const BIRCH_COUNT = 160;
   const birchTrunkGeo = trackGeo(new THREE.CylinderGeometry(0.22, 0.34, 4.8, 7));
   birchTrunkGeo.translate(0, 2.4, 0);
-  const birchCrownGeo = trackGeo(new THREE.IcosahedronGeometry(2.3, 1));
-  birchCrownGeo.translate(0, 5.4, 0);
+  const birchCrownGeo = trackGeo(new THREE.IcosahedronGeometry(2.35, 1));
+  birchCrownGeo.translate(0, 5.5, 0);
 
   const birchTrunkMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -194,17 +190,17 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
 
   let placedBirch = 0;
   attempts = 0;
-  while (placedBirch < BIRCH_COUNT && attempts < 1800) {
+  while (placedBirch < BIRCH_COUNT && attempts < 4000) {
     attempts++;
-    const x = (rand() - 0.5) * 260;
-    const z = (rand() - 0.5) * 240;
+    const x = (rand() - 0.5) * 620;
+    const z = (rand() - 0.5) * 580;
     if (isNearFeature(x, z)) continue;
     const creekD = creekSignedDistance(x, z);
-    if (creekD < 9 || creekD > 38) continue;
+    if (creekD < 10 || creekD > 62) continue;
     const y = groundHeightAt(x, z);
     if (y < WATER_LEVEL + 0.5) continue;
 
-    const scale = 0.82 + rand() * 0.4;
+    const scale = 0.85 + rand() * 0.45;
     dummy.position.set(x, y - 0.1, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
     dummy.scale.set(scale, scale, scale);
@@ -213,14 +209,13 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
     birchTrunks.setMatrixAt(placedBirch, dummy.matrix);
     birchCrowns.setMatrixAt(placedBirch, dummy.matrix);
 
-    // Warm sunlit spring/autumn aspen greens and golds
     if (rand() > 0.3) {
-      colorTmp.setRGB(0.36 + rand() * 0.12, 0.62 + rand() * 0.14, 0.22);
+      colorTmp.setRGB(0.24 + rand() * 0.1, 0.48 + rand() * 0.14, 0.14, THREE.SRGBColorSpace);
     } else {
-      colorTmp.setRGB(0.76 + rand() * 0.12, 0.58 + rand() * 0.12, 0.18);
+      colorTmp.setRGB(0.72 + rand() * 0.14, 0.48 + rand() * 0.12, 0.12, THREE.SRGBColorSpace);
     }
     birchCrowns.setColorAt(placedBirch, colorTmp);
-    obstacles.push({ x, z, radius: 0.9 * scale });
+    obstacles.push({ x, z, radius: 0.85 * scale });
     placedBirch++;
   }
 
@@ -233,10 +228,10 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
   });
 
   // =========================================================================
-  // 3. Mossy Granite Boulders (InstancedMesh)
+  // 3. Mossy Granite Boulders
   // =========================================================================
-  const ROCK_COUNT = 120;
-  const rockGeo = trackGeo(new THREE.DodecahedronGeometry(1.4, 0));
+  const ROCK_COUNT = 260;
+  const rockGeo = trackGeo(new THREE.DodecahedronGeometry(1.45, 0));
   const rockMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -251,28 +246,32 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
 
   let placedRocks = 0;
   attempts = 0;
-  while (placedRocks < ROCK_COUNT && attempts < 1800) {
+  while (placedRocks < ROCK_COUNT && attempts < 4000) {
     attempts++;
     const angle = rand() * Math.PI * 2;
-    const dist = 26 + rand() * 160;
+    const dist = 34 + rand() * 340;
     const x = Math.cos(angle) * dist;
     const z = Math.sin(angle) * dist;
     if (isNearFeature(x, z)) continue;
 
     const y = groundHeightAt(x, z);
-    const s = 0.65 + rand() * 1.15;
+    const s = 0.7 + rand() * 1.3;
     dummy.position.set(x, y + s * 0.32, z);
     dummy.rotation.set(rand() * 1.2, rand() * Math.PI * 2, rand() * 1.2);
-    dummy.scale.set(s * (0.9 + rand() * 0.4), s * (0.6 + rand() * 0.35), s * (0.9 + rand() * 0.4));
+    dummy.scale.set(
+      s * (0.9 + rand() * 0.4),
+      s * (0.6 + rand() * 0.35),
+      s * (0.9 + rand() * 0.4)
+    );
     dummy.updateMatrix();
     rocks.setMatrixAt(placedRocks, dummy.matrix);
 
-    const shade = 0.42 + rand() * 0.22;
-    colorTmp.setRGB(shade, shade + (rand() > 0.5 ? 0.04 : 0), shade * 0.96);
+    const shade = 0.32 + rand() * 0.18;
+    colorTmp.setRGB(shade, shade + (rand() > 0.5 ? 0.03 : 0), shade * 0.95, THREE.SRGBColorSpace);
     rocks.setColorAt(placedRocks, colorTmp);
 
-    if (s > 1.05 && y > WATER_LEVEL) {
-      obstacles.push({ x, z, radius: s * 1.15 });
+    if (s > 1.1 && y > WATER_LEVEL) {
+      obstacles.push({ x, z, radius: s * 1.1 });
     }
     placedRocks++;
   }
@@ -283,11 +282,11 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
   group.add(rocks);
 
   // =========================================================================
-  // 4. Scenic Ranger Lookout Cabin on Lookout Peak (-76, -76)
+  // 4. Scenic Ranger Lookout Cabin on Lookout Peak (-150, -150)
   // =========================================================================
   const cabinGroup = new THREE.Group();
-  const cabinX = -76;
-  const cabinZ = -76;
+  const cabinX = -150;
+  const cabinZ = -150;
   const cabinY = groundHeightAt(cabinX, cabinZ);
   cabinGroup.position.set(cabinX, cabinY, cabinZ);
   cabinGroup.rotation.y = 0.72;
@@ -362,30 +361,53 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
   group.add(cabinGroup);
 
   // =========================================================================
-  // 5. 12 Collectible Golden Pine Stars for Joyful Open-World Discovery
+  // 5. Helper to pick clean random locations anywhere in the valley
   // =========================================================================
-  const starPositions: [number, number][] = [
-    [0, -24],        // Down the first trail
-    [18, -24],       // Above Ramp 1!
-    [-8, -48],       // Center of West Log Bridge
-    [32, -38],       // Crystal Creek Pond splash spot
-    [56, -56],       // Jump Meadow ramp
-    [68, 22],        // East Log Bridge
-    [-76, -64],      // Lookout Peak cabin porch
-    [96, 86],        // Whispering Pines ridge
-    [-34, 38],       // Southwest meadow ramp
-    [12, 76],        // Southern ramp
-    [-82, -18],      // Western trail ramp
-    [-28, 92],       // Sunny Knoll summit
-  ];
+  const getRandomSafeSpot = (
+    minRadius = 24,
+    maxRadius = WORLD_RADIUS - 55
+  ): { x: number; y: number; z: number; yaw: number } => {
+    for (let tries = 0; tries < 200; tries++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = minRadius + Math.sqrt(Math.random()) * (maxRadius - minRadius);
+      const x = Math.cos(angle) * dist;
+      const z = Math.sin(angle) * dist;
 
-  const starGeo = trackGeo(new THREE.OctahedronGeometry(1.15, 0));
-  const haloGeo = trackGeo(new THREE.TorusGeometry(1.65, 0.08, 8, 28));
+      // Avoid deep water & steep high rocks
+      const gh = groundHeightAt(x, z);
+      if (gh < WATER_LEVEL + 0.35 || gh > 22) continue;
+
+      let blocked = false;
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i];
+        if (Math.hypot(x - o.x, z - o.z) < o.radius + 3.2) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) {
+        return {
+          x,
+          y: surfaceHeightAt(x, z),
+          z,
+          yaw: Math.random() * Math.PI * 2,
+        };
+      }
+    }
+    return { x: 0, y: surfaceHeightAt(0, 8), z: 8, yaw: 0 };
+  };
+
+  // =========================================================================
+  // 6. 12 Collectible Golden Pine Stars (Randomized on Start & Reset!)
+  // =========================================================================
+  const STAR_COUNT = 12;
+  const starGeo = trackGeo(new THREE.OctahedronGeometry(1.2, 0));
+  const haloGeo = trackGeo(new THREE.TorusGeometry(1.75, 0.08, 8, 28));
   const starMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xfacc15,
       emissive: 0xf59e0b,
-      emissiveIntensity: 0.75,
+      emissiveIntensity: 0.78,
       roughness: 0.18,
       metalness: 0.85,
     })
@@ -394,15 +416,12 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
     new THREE.MeshBasicMaterial({
       color: 0xfef08a,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.65,
     })
   );
 
-  const stars: CollectibleStar[] = starPositions.map(([sx, sz], idx) => {
-    const sy = Math.max(groundHeightAt(sx, sz), WATER_LEVEL + 0.5) + 2.3;
+  const stars: CollectibleStar[] = Array.from({ length: STAR_COUNT }, (_, idx) => {
     const sGroup = new THREE.Group();
-    sGroup.position.set(sx, sy, sz);
-
     const gem = new THREE.Mesh(starGeo, starMat);
     gem.castShadow = true;
     sGroup.add(gem);
@@ -411,20 +430,45 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
     sGroup.add(halo);
 
     group.add(sGroup);
-    return { id: idx, group: sGroup, x: sx, y: sy, z: sz, collected: false };
+    return { id: idx, group: sGroup, x: 0, y: 2, z: 0, collected: false };
   });
 
+  const randomizeStars = (): void => {
+    const placed: { x: number; z: number }[] = [];
+    for (let i = 0; i < stars.length; i++) {
+      let chosen = getRandomSafeSpot(18, WORLD_RADIUS - 48);
+      // Ensure stars are nicely spread out across the forest
+      for (let spreadAttempt = 0; spreadAttempt < 25; spreadAttempt++) {
+        const tooClose = placed.some((p) => Math.hypot(p.x - chosen.x, p.z - chosen.z) < 48);
+        if (!tooClose) break;
+        chosen = getRandomSafeSpot(18, WORLD_RADIUS - 48);
+      }
+      placed.push({ x: chosen.x, z: chosen.z });
+
+      const sy = chosen.y + 2.1;
+      const st = stars[i];
+      st.x = chosen.x;
+      st.y = sy;
+      st.z = chosen.z;
+      st.collected = false;
+      st.group.position.set(st.x, st.y, st.z);
+      st.group.visible = true;
+    }
+  };
+
+  randomizeStars();
+
   // =========================================================================
-  // 6. Floating Forest Fireflies / Sunbeams (Points)
+  // 7. Floating Forest Fireflies / Sunbeams (Points)
   // =========================================================================
-  const moteCount = 160;
+  const moteCount = 260;
   const moteGeo = trackGeo(new THREE.BufferGeometry());
   const motePos = new Float32Array(moteCount * 3);
   const motePhase = new Float32Array(moteCount);
   for (let i = 0; i < moteCount; i++) {
-    const mx = (rand() - 0.5) * 240;
-    const mz = (rand() - 0.5) * 240;
-    const my = groundHeightAt(mx, mz) + 1.2 + rand() * 5.5;
+    const mx = (rand() - 0.5) * 560;
+    const mz = (rand() - 0.5) * 560;
+    const my = groundHeightAt(mx, mz) + 1.2 + rand() * 6.5;
     motePos[i * 3] = mx;
     motePos[i * 3 + 1] = my;
     motePos[i * 3 + 2] = mz;
@@ -435,7 +479,7 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
     new THREE.PointsMaterial({
       color: 0xfef08a,
       map: textures.particleMap,
-      size: 0.65,
+      size: 0.72,
       transparent: true,
       opacity: 0.55,
       depthWrite: false,
@@ -448,8 +492,9 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
     group,
     obstacles,
     stars,
+    randomizeStars,
+    getRandomSafeSpot,
     update: (elapsed: number, dt: number, isStarlight: boolean) => {
-      // Spin & bob stars
       for (let i = 0; i < stars.length; i++) {
         const st = stars[i];
         if (st.collected) continue;
@@ -457,9 +502,8 @@ export function createWorldProps(textures: ProceduralTextureSet): WorldPropsRig 
         st.group.position.y = st.y + Math.sin(elapsed * 2.6 + st.id) * 0.35;
       }
 
-      // Gentle firefly / sun-mote drift
       moteMat.opacity = isStarlight ? 0.92 : 0.42;
-      moteMat.size = isStarlight ? 0.95 : 0.55;
+      moteMat.size = isStarlight ? 1.05 : 0.6;
       const posAttr = moteGeo.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < moteCount; i++) {
         const py = posAttr.getY(i);

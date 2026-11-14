@@ -24,7 +24,8 @@ import { createWorldProps } from './worldProps';
 const _camDesired = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
 const _forwardVec = new THREE.Vector3();
-const _upVec = new THREE.Vector3(0, 1, 0);
+
+const TRUCK_SCALE = 0.75;
 
 interface SkyPreset {
   bg: number;
@@ -43,10 +44,10 @@ const SKY_PRESETS: Record<TimeOfDay, SkyPreset> = {
   morning: {
     bg: 0x9ad4f5,
     fog: 0xaedcf5,
-    fogDensity: 0.0042,
+    fogDensity: 0.0021,
     sunColor: 0xfff3d6,
     sunIntensity: 2.1,
-    sunPos: [65, 90, 48],
+    sunPos: [75, 110, 58],
     hemiSky: 0x9fd8ff,
     hemiGround: 0x3f5e36,
     hemiIntensity: 0.95,
@@ -55,10 +56,10 @@ const SKY_PRESETS: Record<TimeOfDay, SkyPreset> = {
   sunset: {
     bg: 0xf4a261,
     fog: 0xeb9458,
-    fogDensity: 0.0052,
+    fogDensity: 0.0026,
     sunColor: 0xffb36b,
     sunIntensity: 2.25,
-    sunPos: [-90, 34, -55],
+    sunPos: [-110, 42, -68],
     hemiSky: 0xffcda3,
     hemiGround: 0x3c2c2e,
     hemiIntensity: 0.85,
@@ -67,10 +68,10 @@ const SKY_PRESETS: Record<TimeOfDay, SkyPreset> = {
   starlight: {
     bg: 0x132036,
     fog: 0x16243b,
-    fogDensity: 0.0055,
+    fogDensity: 0.0028,
     sunColor: 0xa5c8ff,
     sunIntensity: 1.05,
-    sunPos: [45, 85, -60],
+    sunPos: [55, 95, -70],
     hemiSky: 0x4b6a9b,
     hemiGround: 0x18251e,
     hemiIntensity: 0.65,
@@ -119,7 +120,7 @@ export class MonsterTruckGameEngine {
   // Vehicle state
   private pos = new THREE.Vector3(0, 1.5, 8);
   private velY = 0;
-  private yaw = 0; // 0 = facing -Z
+  private yaw = 0;
   private speed = 0;
   private steerAngle = 0;
   private wheelSpin = 0;
@@ -129,6 +130,17 @@ export class MonsterTruckGameEngine {
   private chassisBounceVel = 0;
   private airborne = false;
   private wasInWater = false;
+  private rpm = 850;
+  private gear = 1;
+
+  // Mouse look-around orbit state
+  private isDraggingLook = false;
+  private dragPointerId: number | null = null;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private orbitYawOffset = 0;
+  private orbitPitchOffset = 0;
+  private orbitZoomScale = 1.0;
 
   // Mode & input state
   private input: InputState = {
@@ -157,7 +169,7 @@ export class MonsterTruckGameEngine {
     this.onHudUpdate = onHudUpdate;
     this.audio = new ProceduralAudio();
 
-    // 1. Software WebGL detection (used strictly for render cost & frame pacing)
+    // 1. Software WebGL detection
     this.isSoftwareGl = (() => {
       const probe = document.createElement('canvas').getContext('webgl2');
       if (!probe) return true;
@@ -185,11 +197,19 @@ export class MonsterTruckGameEngine {
     this.renderer.domElement.style.display = 'block';
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
+    this.renderer.domElement.style.cursor = 'grab';
     container.appendChild(this.renderer.domElement);
 
-    // WebGL context loss safety
-    this.renderer.domElement.addEventListener('webglcontextlost', this.handleContextLost);
-    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored);
+    // WebGL context loss & mouse look-around listeners
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener('webglcontextlost', this.handleContextLost);
+    canvas.addEventListener('webglcontextrestored', this.handleContextRestored);
+    canvas.addEventListener('pointerdown', this.handlePointerDown);
+    window.addEventListener('pointermove', this.handlePointerMove);
+    window.addEventListener('pointerup', this.handlePointerUp);
+    window.addEventListener('pointercancel', this.handlePointerUp);
+    canvas.addEventListener('wheel', this.handleWheel, { passive: false });
+    canvas.addEventListener('dblclick', this.handleDoubleClick);
 
     // 3. Scene, Environment Map (RoomEnvironment), Fog, Camera
     this.scene = new THREE.Scene();
@@ -203,9 +223,9 @@ export class MonsterTruckGameEngine {
     this.scene.environment = this.envRT.texture;
     pmrem.dispose();
 
-    this.camera = new THREE.PerspectiveCamera(62, width / height, 0.3, 480);
+    this.camera = new THREE.PerspectiveCamera(62, width / height, 0.3, 980);
 
-    // 4. Outdoor 2-Light Rig (Warm Directional Sun + Cool Hemisphere Fill)
+    // 4. Outdoor 2-Light Rig
     this.hemiLight = new THREE.HemisphereLight(
       initialPreset.hemiSky,
       initialPreset.hemiGround,
@@ -219,8 +239,8 @@ export class MonsterTruckGameEngine {
     this.sunLight.shadow.mapSize.width = 2048;
     this.sunLight.shadow.mapSize.height = 2048;
     this.sunLight.shadow.camera.near = 10;
-    this.sunLight.shadow.camera.far = 230;
-    const d = 58;
+    this.sunLight.shadow.camera.far = 280;
+    const d = 64;
     this.sunLight.shadow.camera.left = -d;
     this.sunLight.shadow.camera.right = d;
     this.sunLight.shadow.camera.top = d;
@@ -238,6 +258,7 @@ export class MonsterTruckGameEngine {
     this.scene.add(this.terrainRig.group);
 
     this.truck = createMonsterTruck(this.textures);
+    this.truck.root.scale.setScalar(TRUCK_SCALE);
     this.pos.y = surfaceHeightAt(this.pos.x, this.pos.z);
     this.truck.root.position.copy(this.pos);
     this.scene.add(this.truck.root);
@@ -245,7 +266,7 @@ export class MonsterTruckGameEngine {
     this.worldProps = createWorldProps(this.textures);
     this.scene.add(this.worldProps.group);
 
-    // 6. Particle Pool Setup (Dust & Water Splashes)
+    // 6. Particle Pool Setup
     this.particlePositions = new Float32Array(this.PARTICLE_MAX * 3);
     this.particleColors = new Float32Array(this.PARTICLE_MAX * 3);
     for (let i = 0; i < this.PARTICLE_MAX; i++) {
@@ -267,7 +288,7 @@ export class MonsterTruckGameEngine {
     this.particleGeo.setAttribute('position', new THREE.BufferAttribute(this.particlePositions, 3));
     this.particleGeo.setAttribute('color', new THREE.BufferAttribute(this.particleColors, 3));
     this.particleMat = new THREE.PointsMaterial({
-      size: 1.5,
+      size: 1.25,
       map: this.textures.particleMap,
       vertexColors: true,
       transparent: true,
@@ -278,9 +299,9 @@ export class MonsterTruckGameEngine {
     particlePoints.frustumCulled = false;
     this.scene.add(particlePoints);
 
-    // Place camera cleanly behind truck on start
-    this.camera.position.set(0, this.pos.y + 6.5, this.pos.z + 14.5);
-    this.camera.lookAt(this.pos.x, this.pos.y + 2.2, this.pos.z - 4);
+    // Initial camera placement behind the scaled monster truck
+    this.camera.position.set(0, this.pos.y + 5.0, this.pos.z + 11.0);
+    this.camera.lookAt(this.pos.x, this.pos.y + 1.8, this.pos.z - 4);
 
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
@@ -290,6 +311,57 @@ export class MonsterTruckGameEngine {
     this.emitHud();
     this.clock.start();
     this.scheduleNextTick();
+  }
+
+  private handlePointerDown = (e: PointerEvent): void => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    this.audio.unlock();
+    this.isDraggingLook = true;
+    this.dragPointerId = e.pointerId;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.renderer.domElement.style.cursor = 'grabbing';
+  };
+
+  private handlePointerMove = (e: PointerEvent): void => {
+    if (!this.isDraggingLook || e.pointerId !== this.dragPointerId) return;
+    const dx = e.clientX - this.lastPointerX;
+    const dy = e.clientY - this.lastPointerY;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+
+    this.orbitYawOffset -= dx * 0.0072;
+    this.orbitPitchOffset = THREE.MathUtils.clamp(
+      this.orbitPitchOffset + dy * 0.0055,
+      -0.25,
+      0.85
+    );
+  };
+
+  private handlePointerUp = (e: PointerEvent): void => {
+    if (!this.isDraggingLook || e.pointerId !== this.dragPointerId) return;
+    this.isDraggingLook = false;
+    this.dragPointerId = null;
+    this.renderer.domElement.style.cursor = 'grab';
+  };
+
+  private handleWheel = (e: WheelEvent): void => {
+    e.preventDefault();
+    this.orbitZoomScale = THREE.MathUtils.clamp(
+      this.orbitZoomScale + e.deltaY * 0.0008,
+      0.65,
+      1.95
+    );
+  };
+
+  private handleDoubleClick = (): void => {
+    this.recenterCamera();
+  };
+
+  public recenterCamera(): void {
+    this.orbitYawOffset = 0;
+    this.orbitPitchOffset = 0;
+    this.orbitZoomScale = 1.0;
   }
 
   private handleContextLost = (e: Event): void => {
@@ -339,24 +411,19 @@ export class MonsterTruckGameEngine {
 
   public setCameraMode(mode: CameraMode): void {
     this.cameraMode = mode;
+    this.recenterCamera();
   }
 
   public honk(): void {
     this.audio.playHorn();
-    // Playful happy bounce when honking!
     this.chassisBounceVel += 2.2;
   }
 
   public resetTruck(): void {
     this.audio.unlock();
-    const groundY = surfaceHeightAt(this.pos.x, this.pos.z);
-    // If near outer rim, return to sunny clearing
-    if (Math.hypot(this.pos.x, this.pos.z) > WORLD_RADIUS - 20) {
-      this.pos.set(0, surfaceHeightAt(0, 8), 8);
-      this.yaw = 0;
-    } else {
-      this.pos.y = groundY + 1.4;
-    }
+    const spot = this.worldProps.getRandomSafeSpot(28, WORLD_RADIUS - 65);
+    this.pos.set(spot.x, spot.y + 1.3, spot.z);
+    this.yaw = spot.yaw;
     this.velY = 0;
     this.speed = 0;
     this.pitchAngle = 0;
@@ -364,20 +431,26 @@ export class MonsterTruckGameEngine {
     this.chassisBounce = 0.25;
     this.chassisBounceVel = 0;
     this.airborne = false;
+    this.recenterCamera();
+
+    // Randomize all star locations on reset too
+    this.worldProps.randomizeStars();
+    this.starsCollected = 0;
+    this.emitHud();
   }
 
   private emitParticle(x: number, y: number, z: number, isWater: boolean): void {
     const p = this.particles[this.particleCursor];
     this.particleCursor = (this.particleCursor + 1) % this.PARTICLE_MAX;
     p.active = true;
-    p.x = x + (Math.random() - 0.5) * 0.7;
-    p.y = y + 0.2;
-    p.z = z + (Math.random() - 0.5) * 0.7;
-    p.vx = (Math.random() - 0.5) * 2.4;
-    p.vy = isWater ? 2.8 + Math.random() * 2.4 : 1.0 + Math.random() * 1.4;
-    p.vz = (Math.random() - 0.5) * 2.4;
+    p.x = x + (Math.random() - 0.5) * 0.55;
+    p.y = y + 0.16;
+    p.z = z + (Math.random() - 0.5) * 0.55;
+    p.vx = (Math.random() - 0.5) * 2.1;
+    p.vy = isWater ? 2.4 + Math.random() * 2.1 : 0.8 + Math.random() * 1.2;
+    p.vz = (Math.random() - 0.5) * 2.1;
     p.life = 0;
-    p.maxLife = isWater ? 0.55 + Math.random() * 0.25 : 0.65 + Math.random() * 0.35;
+    p.maxLife = isWater ? 0.52 + Math.random() * 0.25 : 0.62 + Math.random() * 0.35;
     p.isWater = isWater;
   }
 
@@ -414,36 +487,31 @@ export class MonsterTruckGameEngine {
   }
 
   private updatePhysics(dt: number): void {
-    const maxSpeed = this.input.boost ? 34 : 23;
+    const maxSpeed = this.input.boost ? 36 : 24;
     const accel = this.input.boost ? 36 : 22;
     const reverseMax = -12;
 
-    // 1. Longitudinal throttle & friendly braking
     if (this.input.forward) {
       this.speed += accel * dt;
     } else if (this.input.backward) {
       if (this.speed > 1.5) {
-        this.speed -= 34 * dt; // Smooth brake
+        this.speed -= 34 * dt;
       } else {
-        this.speed -= 16 * dt; // Reverse
+        this.speed -= 16 * dt;
       }
     } else {
-      // Gentle rolling drag
       this.speed *= Math.exp(-2.1 * dt);
       if (Math.abs(this.speed) < 0.08) this.speed = 0;
     }
     this.speed = THREE.MathUtils.clamp(this.speed, reverseMax, maxSpeed);
 
-    // 2. Smooth kid-friendly steering
     const targetSteer = (this.input.left ? 1 : 0) - (this.input.right ? 1 : 0);
     this.steerAngle = THREE.MathUtils.damp(this.steerAngle, targetSteer * 0.46, 10, dt);
 
-    const speedFactor = Math.min(1, Math.abs(this.speed) / 4.5);
+    const speedFactor = Math.min(1, Math.abs(this.speed) / 4.2);
     const turnDir = this.speed >= -0.2 ? 1 : -1;
-    // Allow slight stationary turning only when moving, crisp arc at speed
     this.yaw += this.steerAngle * 2.55 * speedFactor * turnDir * dt;
 
-    // 3. Move along forward vector (-Z local)
     const sinY = Math.sin(this.yaw);
     const cosY = Math.cos(this.yaw);
     const fx = -sinY;
@@ -454,8 +522,8 @@ export class MonsterTruckGameEngine {
     this.pos.x += fx * this.speed * dt;
     this.pos.z += fz * this.speed * dt;
 
-    // 4. Gentle tree/boulder deflection (never traps the child!)
-    const truckRadius = 2.1;
+    // Gentle tree/boulder deflection
+    const truckRadius = 2.0 * TRUCK_SCALE;
     const obs = this.worldProps.obstacles;
     for (let i = 0; i < obs.length; i++) {
       const o = obs[i];
@@ -468,25 +536,23 @@ export class MonsterTruckGameEngine {
         const push = minD - dist;
         this.pos.x += (dx / dist) * push;
         this.pos.z += (dz / dist) * push;
-        // Softly scrub a bit of speed without jarring full stop
         this.speed *= 0.92;
       }
     }
 
-    // 5. Natural mountain perimeter turn-in (soft pushback inside valley)
+    // Soft valley perimeter turn-in
     const radialDist = Math.hypot(this.pos.x, this.pos.z);
     if (radialDist > WORLD_RADIUS) {
       const nx = this.pos.x / radialDist;
       const nz = this.pos.z / radialDist;
       this.pos.x = nx * WORLD_RADIUS;
       this.pos.z = nz * WORLD_RADIUS;
-      // Gently steer velocity inward
       this.speed *= 0.85;
     }
 
-    // 6. 4-Wheel terrain contact sampling (supports hills, bridges & ramps!)
-    const halfTrack = 1.62;
-    const halfWheelbase = 1.78;
+    // 4-Wheel terrain sampling scaled to truck dimensions
+    const halfTrack = 1.62 * TRUCK_SCALE;
+    const halfWheelbase = 1.78 * TRUCK_SCALE;
 
     const hFL = surfaceHeightAt(this.pos.x + fx * halfWheelbase - rx * halfTrack, this.pos.z + fz * halfWheelbase - rz * halfTrack);
     const hFR = surfaceHeightAt(this.pos.x + fx * halfWheelbase + rx * halfTrack, this.pos.z + fz * halfWheelbase + rz * halfTrack);
@@ -497,7 +563,6 @@ export class MonsterTruckGameEngine {
     const prevGroundY = surfaceHeightAt(this.pos.x - fx * 0.5, this.pos.z - fz * 0.5);
     const slopeLaunch = (avgGroundY - prevGroundY) * Math.max(0, this.speed) * 0.45;
 
-    // Gravity & ramp launch
     if (this.pos.y <= avgGroundY + 0.08 && this.velY <= 0.5) {
       if (this.airborne) {
         const impact = Math.min(1.5, Math.abs(this.velY) * 0.12);
@@ -508,9 +573,8 @@ export class MonsterTruckGameEngine {
         this.airborne = false;
       }
       this.pos.y = avgGroundY;
-      // Launch into air off steep ramp lips
-      if (slopeLaunch > 3.2 && this.speed > 13) {
-        this.velY = Math.min(11.5, slopeLaunch * 1.15);
+      if (slopeLaunch > 3.0 && this.speed > 12) {
+        this.velY = Math.min(12.0, slopeLaunch * 1.15);
         this.airborne = true;
       } else {
         this.velY = 0;
@@ -531,7 +595,6 @@ export class MonsterTruckGameEngine {
       }
     }
 
-    // 7. Chassis pitch, roll & bouncy monster suspension
     const targetPitch = Math.atan2((hFL + hFR) * 0.5 - (hRL + hRR) * 0.5, halfWheelbase * 2);
     const targetRoll = Math.atan2((hRL + hFL) * 0.5 - (hRR + hFR) * 0.5, halfTrack * 2);
     const turnBodyRoll = -this.steerAngle * (this.speed / 26) * 0.14;
@@ -539,20 +602,18 @@ export class MonsterTruckGameEngine {
     this.pitchAngle = THREE.MathUtils.damp(this.pitchAngle, targetPitch, 9, dt);
     this.rollAngle = THREE.MathUtils.damp(this.rollAngle, targetRoll + turnBodyRoll, 9, dt);
 
-    // Second-order spring suspension bounce
     const springForce = -72 * this.chassisBounce - 9.5 * this.chassisBounceVel;
     this.chassisBounceVel += springForce * dt;
     this.chassisBounce += this.chassisBounceVel * dt;
     this.chassisBounce = THREE.MathUtils.clamp(this.chassisBounce, -0.35, 0.42);
 
-    // Apply transform to truck root & chassis
     this.truck.root.position.copy(this.pos);
     this.truck.root.rotation.order = 'YXZ';
     this.truck.root.rotation.set(this.pitchAngle, this.yaw, this.rollAngle);
     this.truck.chassisGroup.position.y = this.chassisBounce;
 
-    // Spin & steer wheels
-    this.wheelSpin -= (this.speed / this.truck.wheelRadius) * dt;
+    const scaledWheelR = this.truck.wheelRadius * TRUCK_SCALE;
+    this.wheelSpin -= (this.speed / scaledWheelR) * dt;
     this.truck.wheelPivots.fl.rotation.y = this.steerAngle;
     this.truck.wheelPivots.fr.rotation.y = this.steerAngle;
     this.truck.wheelSpinners.fl.rotation.x = this.wheelSpin;
@@ -560,37 +621,65 @@ export class MonsterTruckGameEngine {
     this.truck.wheelSpinners.rl.rotation.x = this.wheelSpin;
     this.truck.wheelSpinners.rr.rotation.x = this.wheelSpin;
 
-    // Ground contact shadow gently shrinks/fades when jumping high
     const heightAboveGround = Math.max(0, this.pos.y - avgGroundY);
     const shadowScale = Math.max(0.55, 1 - heightAboveGround * 0.08);
     this.truck.contactShadow.scale.set(shadowScale, 1, shadowScale);
     this.truck.contactShadow.position.y = 0.05 - heightAboveGround * 0.85;
 
-    // 8. Creek splash & dust particles
+    // Simulated 4-speed automatic gearbox + Tachometer RPM
+    const absSpeed = Math.abs(this.speed);
+    if (this.speed < -0.5) {
+      this.gear = 0; // Reverse
+    } else if (absSpeed < 7) {
+      this.gear = 1;
+    } else if (absSpeed < 14) {
+      this.gear = 2;
+    } else if (absSpeed < 22) {
+      this.gear = 3;
+    } else {
+      this.gear = 4;
+    }
+
+    const gearMin = [0, 0, 6.5, 13.5, 21.5][this.gear] ?? 0;
+    const gearMax = [12, 8.2, 15.2, 23.2, 36.5][this.gear] ?? 36;
+    const gearProgress = THREE.MathUtils.clamp((absSpeed - gearMin) / (gearMax - gearMin), 0, 1);
+    const throttleBonus = this.input.forward || this.input.backward ? 950 : 0;
+    const turboBonus = this.input.boost ? 1200 : 0;
+    const airBonus = this.airborne && this.input.forward ? 900 : 0;
+    const targetRpm = THREE.MathUtils.clamp(
+      900 + gearProgress * 4650 + throttleBonus + turboBonus + airBonus,
+      850,
+      7200
+    );
+    this.rpm = THREE.MathUtils.damp(this.rpm, targetRpm, 9.5, dt);
+
+    // Creek splash & dust particles
     const baseTerrainY = groundHeightAt(this.pos.x, this.pos.z);
     const inWater = !this.airborne && baseTerrainY < WATER_LEVEL + 0.05 && this.pos.y < WATER_LEVEL + 0.4;
-    if (inWater && !this.wasInWater && Math.abs(this.speed) > 4) {
+    if (inWater && !this.wasInWater && absSpeed > 3.5) {
       this.audio.playSplash();
     }
     this.wasInWater = inWater;
 
     this.particleEmitTimer += dt;
-    if (!this.airborne && Math.abs(this.speed) > 3.5 && this.particleEmitTimer > 0.045) {
+    if (!this.airborne && absSpeed > 3.5 && this.particleEmitTimer > 0.045) {
       this.particleEmitTimer = 0;
-      const rearLx = this.pos.x - fx * 1.8 - rx * 1.5;
-      const rearLz = this.pos.z - fz * 1.8 - rz * 1.5;
-      const rearRx = this.pos.x - fx * 1.8 + rx * 1.5;
-      const rearRz = this.pos.z - fz * 1.8 + rz * 1.5;
+      const rearDist = 1.8 * TRUCK_SCALE;
+      const sideDist = 1.5 * TRUCK_SCALE;
+      const rearLx = this.pos.x - fx * rearDist - rx * sideDist;
+      const rearLz = this.pos.z - fz * rearDist - rz * sideDist;
+      const rearRx = this.pos.x - fx * rearDist + rx * sideDist;
+      const rearRz = this.pos.z - fz * rearDist + rz * sideDist;
       this.emitParticle(rearLx, this.pos.y + 0.15, rearLz, inWater);
       this.emitParticle(rearRx, this.pos.y + 0.15, rearRz, inWater);
     }
 
-    // 9. Collect Golden Pine Stars (generous 4.2m radius)
+    // Collect Golden Pine Stars
     const stars = this.worldProps.stars;
     for (let i = 0; i < stars.length; i++) {
       const st = stars[i];
       if (st.collected) continue;
-      const dist = Math.hypot(this.pos.x - st.x, this.pos.y + 1.5 - st.y, this.pos.z - st.z);
+      const dist = Math.hypot(this.pos.x - st.x, this.pos.y + 1.2 - st.y, this.pos.z - st.z);
       if (dist < 4.5) {
         st.collected = true;
         st.group.visible = false;
@@ -601,75 +690,67 @@ export class MonsterTruckGameEngine {
       }
     }
 
-    // 10. Update audio engine pitch
     this.audio.updateEngine(
-      Math.abs(this.speed) / 24,
+      absSpeed / 24,
       this.input.forward || this.input.backward,
       this.input.boost
     );
   }
 
   private updateCamera(dt: number): void {
-    const sinY = Math.sin(this.yaw);
-    const cosY = Math.cos(this.yaw);
+    const viewYaw = this.yaw + this.orbitYawOffset;
+    const sinY = Math.sin(viewYaw);
+    const cosY = Math.cos(viewYaw);
     _forwardVec.set(-sinY, 0, -cosY);
 
-    if (this.cameraMode === 'chase') {
+    if (this.cameraMode === 'hood') {
+      const truckSin = Math.sin(this.yaw);
+      const truckCos = Math.cos(this.yaw);
       _camDesired.set(
-        this.pos.x - _forwardVec.x * 13.5,
-        this.pos.y + 5.8,
-        this.pos.z - _forwardVec.z * 13.5
-      );
-      _camLookTarget.set(
-        this.pos.x + _forwardVec.x * 5.0,
-        this.pos.y + 2.3,
-        this.pos.z + _forwardVec.z * 5.0
-      );
-    } else if (this.cameraMode === 'wide') {
-      _camDesired.set(
-        this.pos.x - _forwardVec.x * 21.0,
-        this.pos.y + 10.2,
-        this.pos.z - _forwardVec.z * 21.0
-      );
-      _camLookTarget.set(
-        this.pos.x + _forwardVec.x * 4.0,
-        this.pos.y + 1.8,
-        this.pos.z + _forwardVec.z * 4.0
-      );
-    } else {
-      // Hood cam
-      _camDesired.set(
-        this.pos.x + _forwardVec.x * 0.4,
-        this.pos.y + 3.65,
-        this.pos.z + _forwardVec.z * 0.4
+        this.pos.x - truckSin * 0.35,
+        this.pos.y + 2.75,
+        this.pos.z - truckCos * 0.35
       );
       _camLookTarget.set(
         this.pos.x + _forwardVec.x * 18.0,
-        this.pos.y + 2.5,
+        this.pos.y + 2.1 - Math.sin(this.orbitPitchOffset) * 8.0,
         this.pos.z + _forwardVec.z * 18.0
+      );
+    } else {
+      const baseDist = (this.cameraMode === 'wide' ? 17.5 : 10.8) * this.orbitZoomScale;
+      const baseHeight = (this.cameraMode === 'wide' ? 7.8 : 4.4) * this.orbitZoomScale;
+      const pitchHeight = Math.sin(this.orbitPitchOffset) * baseDist * 0.72;
+      const horizDist = Math.max(3.5, baseDist * Math.cos(this.orbitPitchOffset * 0.65));
+
+      _camDesired.set(
+        this.pos.x - _forwardVec.x * horizDist,
+        this.pos.y + baseHeight + pitchHeight,
+        this.pos.z - _forwardVec.z * horizDist
+      );
+      _camLookTarget.set(
+        this.pos.x + _forwardVec.x * 3.5,
+        this.pos.y + 1.85,
+        this.pos.z + _forwardVec.z * 3.5
       );
     }
 
-    // Keep camera safely above terrain surface
     const groundAtCam = surfaceHeightAt(_camDesired.x, _camDesired.z);
-    if (_camDesired.y < groundAtCam + 1.6) {
-      _camDesired.y = groundAtCam + 1.6;
+    if (_camDesired.y < groundAtCam + 1.35) {
+      _camDesired.y = groundAtCam + 1.35;
     }
 
-    const dampLambda = this.cameraMode === 'hood' ? 16 : 6.8;
+    const dampLambda = this.isDraggingLook ? 22 : this.cameraMode === 'hood' ? 16 : 7.8;
     this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _camDesired.x, dampLambda, dt);
     this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _camDesired.y, dampLambda, dt);
     this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _camDesired.z, dampLambda, dt);
     this.camera.lookAt(_camLookTarget);
 
-    // Subtle speed FOV widening
     const targetFov = this.input.boost ? 70 : 62 + Math.min(6, Math.abs(this.speed) * 0.22);
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 6, dt);
       this.camera.updateProjectionMatrix();
     }
 
-    // Move directional sun shadow frustum with truck so shadows stay crisp across the whole valley
     const p = SKY_PRESETS[this.timeOfDay];
     this.sunLight.position.set(
       this.pos.x + p.sunPos[0],
@@ -678,12 +759,13 @@ export class MonsterTruckGameEngine {
     );
     this.sunLight.target.position.copy(this.pos);
     this.sunLight.target.updateMatrixWorld();
-    void _upVec;
   }
 
   private emitHud(): void {
     this.onHudUpdate({
       speedKmh: Math.round(Math.abs(this.speed) * 2.8),
+      rpm: Math.round(this.rpm),
+      gear: this.gear,
       starsCollected: this.starsCollected,
       totalStars: this.worldProps.stars.length,
       zoneName: getZoneNameAt(this.pos.x, this.pos.z),
@@ -739,7 +821,7 @@ export class MonsterTruckGameEngine {
     this.updateCamera(dt);
 
     this.hudTimer += dt;
-    if (this.hudTimer >= 0.1) {
+    if (this.hudTimer >= 0.065) {
       this.hudTimer = 0;
       this.emitHud();
     }
@@ -753,8 +835,15 @@ export class MonsterTruckGameEngine {
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
     window.removeEventListener('resize', this.handleResize);
-    this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost);
-    this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored);
+    window.removeEventListener('pointermove', this.handlePointerMove);
+    window.removeEventListener('pointerup', this.handlePointerUp);
+    window.removeEventListener('pointercancel', this.handlePointerUp);
+    const canvas = this.renderer.domElement;
+    canvas.removeEventListener('webglcontextlost', this.handleContextLost);
+    canvas.removeEventListener('webglcontextrestored', this.handleContextRestored);
+    canvas.removeEventListener('pointerdown', this.handlePointerDown);
+    canvas.removeEventListener('wheel', this.handleWheel);
+    canvas.removeEventListener('dblclick', this.handleDoubleClick);
 
     this.audio.dispose();
     this.truck.dispose();
@@ -766,8 +855,8 @@ export class MonsterTruckGameEngine {
     this.envRT.dispose();
     this.renderer.dispose();
 
-    if (this.renderer.domElement.parentNode === this.container) {
-      this.container.removeChild(this.renderer.domElement);
+    if (canvas.parentNode === this.container) {
+      this.container.removeChild(canvas);
     }
   }
 }

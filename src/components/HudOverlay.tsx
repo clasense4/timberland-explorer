@@ -27,11 +27,98 @@ interface HudOverlayProps {
   onSelectColor: (color: TruckColorId) => void;
   onSelectTimeOfDay: (time: TimeOfDay) => void;
   onSelectCamera: (mode: CameraMode) => void;
+  onRecenterCamera: () => void;
   onToggleMute: () => void;
   onHonk: () => void;
   onReset: () => void;
   onVirtualInput: (key: keyof InputState, down: boolean) => void;
 }
+
+const TachometerGauge: React.FC<{ rpm: number; speedKmh: number; gear: number }> = ({
+  rpm,
+  speedKmh,
+  gear,
+}) => {
+  const maxRpm = 7500;
+  const clampedRpm = Math.min(maxRpm, Math.max(0, rpm));
+  const ratio = clampedRpm / maxRpm;
+  // Arc sweeps from -125 deg to +125 deg (0 deg = straight up)
+  const needleAngle = -125 + ratio * 250;
+
+  const gearLabel = gear === 0 ? 'R' : String(gear);
+  const rpmArcLength = 158; // approx arc length for radius 36 over 250 deg
+  const activeStroke = ratio * rpmArcLength;
+  const arcColor = ratio > 0.82 ? '#ef4444' : ratio > 0.62 ? '#f59e0b' : '#22c55e';
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="relative h-[86px] w-[96px] shrink-0">
+        <svg viewBox="0 0 100 90" className="h-full w-full overflow-visible" aria-hidden="true">
+          {/* Background gauge track */}
+          <path
+            d="M 20.5 67.5 A 36 36 0 1 1 79.5 67.5"
+            fill="none"
+            stroke="rgba(255,255,255,0.14)"
+            strokeWidth="7"
+            strokeLinecap="round"
+          />
+          {/* Live RPM colored arc */}
+          <path
+            d="M 20.5 67.5 A 36 36 0 1 1 79.5 67.5"
+            fill="none"
+            stroke={arcColor}
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeDasharray={`${activeStroke} ${rpmArcLength}`}
+          />
+          {/* Tick marks 0..7 */}
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((tick) => {
+            const tRatio = tick / 7;
+            const deg = (-125 + tRatio * 250 - 90) * (Math.PI / 180);
+            const x1 = 50 + Math.cos(deg) * 29;
+            const y1 = 46 + Math.sin(deg) * 29;
+            const x2 = 50 + Math.cos(deg) * 34;
+            const y2 = 46 + Math.sin(deg) * 34;
+            return (
+              <line
+                key={tick}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke={tick >= 6 ? '#f87171' : 'rgba(255,255,255,0.55)'}
+                strokeWidth="1.6"
+              />
+            );
+          })}
+          {/* Sweeping RPM needle */}
+          <g transform={`rotate(${needleAngle} 50 46)`}>
+            <polygon points="48.5,48 50,15 51.5,48" fill="#fbbf24" />
+            <circle cx="50" cy="46" r="4.2" fill="#f8fafc" />
+          </g>
+        </svg>
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0.5 text-center leading-none">
+          <div className="font-mono-tabular text-base font-bold text-white">{speedKmh}</div>
+          <div className="text-[10px] font-medium text-stone-400">km/h</div>
+        </div>
+      </div>
+
+      <div className="flex flex-col justify-center text-xs">
+        <div className="flex items-baseline gap-1.5">
+          <span className="font-mono-tabular text-sm font-semibold text-stone-100">
+            {clampedRpm}
+          </span>
+          <span className="text-stone-400">RPM</span>
+        </div>
+        <div className="mt-1 flex items-center gap-1.5 text-stone-300">
+          <span>Gear</span>
+          <span className="font-mono-tabular font-bold text-amber-300">{gearLabel}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const HudOverlay: React.FC<HudOverlayProps> = ({
   hud,
@@ -42,6 +129,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   onSelectColor,
   onSelectTimeOfDay,
   onSelectCamera,
+  onRecenterCamera,
   onToggleMute,
   onHonk,
   onReset,
@@ -74,38 +162,53 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-4 sm:p-5">
-      {/* Top Bar: Unobtrusive Left Telemetry & Right Audio / Touch Pad */}
+      {/* Top Bar: Left Title + Tachometer & Right Audio / Drive Pad */}
       <div className="flex items-start justify-between gap-4">
         <div
-          className="pointer-events-auto rounded-xl border border-white/15 px-4 py-2.5 shadow-lg"
-          style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
+          className="pointer-events-auto flex flex-wrap items-center gap-4 rounded-xl border border-white/15 px-4 py-2.5 shadow-lg"
+          style={{ backgroundColor: 'rgba(15, 24, 19, 0.85)' }}
         >
-          <h1 className="font-display text-base sm:text-lg font-bold tracking-tight text-stone-50 whitespace-nowrap">
-            Timberland Explorer
-          </h1>
-          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs sm:text-sm text-stone-300">
-            <span className="font-medium text-amber-300 whitespace-nowrap">{hud.zoneName}</span>
-            <span aria-hidden="true" className="text-stone-500">
-              ·
-            </span>
-            <span className="font-mono-tabular font-semibold text-white whitespace-nowrap">
-              {hud.speedKmh} km/h
-            </span>
-            <span aria-hidden="true" className="text-stone-500">
-              ·
-            </span>
-            <span className="font-mono-tabular text-amber-200 whitespace-nowrap">
-              {hud.starsCollected} / {hud.totalStars} Stars
-            </span>
+          <div>
+            <h1 className="font-display text-base sm:text-lg font-bold tracking-tight text-stone-50 whitespace-nowrap">
+              Timberland Explorer
+            </h1>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs sm:text-sm text-stone-300">
+              <span className="font-medium text-amber-300 whitespace-nowrap">{hud.zoneName}</span>
+              <span aria-hidden="true" className="text-stone-500">
+                ·
+              </span>
+              <span className="font-mono-tabular text-amber-200 whitespace-nowrap">
+                {hud.starsCollected} / {hud.totalStars} Stars
+              </span>
+            </div>
           </div>
+
+          <div className="h-10 w-px bg-white/10 hidden sm:block" />
+
+          <TachometerGauge rpm={hud.rpm} speedKmh={hud.speedKmh} gear={hud.gear} />
         </div>
 
         <div className="pointer-events-auto flex items-center gap-2">
           <button
             type="button"
+            onClick={onRecenterCamera}
+            className="flex min-h-[40px] items-center gap-1.5 rounded-xl border border-white/15 px-3 py-2 text-xs sm:text-sm font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0"
+            style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
+            title="Center camera behind truck"
+          >
+            <Camera className="h-4 w-4 shrink-0 text-stone-300" />
+            <span className="hidden sm:inline">Center View</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setTouchPadOpen((prev) => !prev)}
             className="flex min-h-[40px] items-center gap-2 rounded-xl border border-white/15 px-3.5 py-2 text-xs sm:text-sm font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0"
-            style={{ backgroundColor: touchPadOpen ? 'rgba(217, 119, 6, 0.88)' : 'rgba(15, 24, 19, 0.84)' }}
+            style={{
+              backgroundColor: touchPadOpen
+                ? 'rgba(217, 119, 6, 0.88)'
+                : 'rgba(15, 24, 19, 0.84)',
+            }}
             aria-pressed={touchPadOpen}
           >
             <Gamepad2 className="h-4 w-4 shrink-0" />
@@ -119,12 +222,16 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
             aria-label={muted ? 'Unmute sound' : 'Mute sound'}
           >
-            {muted ? <VolumeX className="h-4 w-4 text-rose-300" /> : <Volume2 className="h-4 w-4 text-emerald-300" />}
+            {muted ? (
+              <VolumeX className="h-4 w-4 text-rose-300" />
+            ) : (
+              <Volume2 className="h-4 w-4 text-emerald-300" />
+            )}
           </button>
         </div>
       </div>
 
-      {/* Optional On-Screen Drive Pad for Touch / Mouse Play */}
+      {/* Optional On-Screen Drive Pad */}
       {touchPadOpen && (
         <div className="pointer-events-none flex items-end justify-between gap-4 pb-2">
           <div className="pointer-events-auto flex items-center gap-2">
@@ -192,7 +299,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
         {dockOpen && (
           <div
-            className="pointer-events-auto w-full max-w-[920px] rounded-2xl border border-white/15 px-4 py-3 shadow-2xl"
+            className="pointer-events-auto w-full max-w-[940px] rounded-2xl border border-white/15 px-4 py-3 shadow-2xl"
             style={{ backgroundColor: 'rgba(15, 24, 19, 0.88)' }}
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -264,7 +371,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 })}
               </div>
 
-              {/* Playful Actions: Honk, Turbo, Reset */}
+              {/* Playful Actions: Honk, Turbo, Random Reset */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -287,14 +394,14 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                   className="flex min-h-[36px] items-center gap-1 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-stone-200 transition-colors hover:bg-white/20 whitespace-nowrap shrink-0"
                 >
                   <RotateCcw className="h-3.5 w-3.5 shrink-0" />
-                  <span>Reset (R)</span>
+                  <span>Random Reset (R)</span>
                 </button>
               </div>
             </div>
 
-            {/* Quiet Single-Line Keyboard Legend */}
+            {/* Quiet Single-Line Legend */}
             <div className="mt-2 border-t border-white/10 pt-1.5 text-center text-xs text-stone-300">
-              Drive with Arrow Keys or WASD · Hold Space for Turbo · Press H to Honk · Explore the creek, bridges, lookout hill, and ramps
+              Drive: WASD / Arrows · Look around: Drag mouse &amp; scroll to zoom · Turbo: Space · Honk: H · Random Spot &amp; Stars: R
             </div>
           </div>
         )}

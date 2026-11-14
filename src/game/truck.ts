@@ -79,11 +79,12 @@ export function createMonsterTruck(textures: ProceduralTextureSet): MonsterTruck
 
   const glassMat = trackMat(
     new THREE.MeshPhysicalMaterial({
-      color: 0x1a2c38,
-      roughness: 0.08,
-      metalness: 0.1,
-      clearcoat: 1.0,
-      opacity: 0.88,
+      color: 0x0d1821,
+      roughness: 0.14,
+      metalness: 0.15,
+      clearcoat: 0.7,
+      envMapIntensity: 0.55,
+      opacity: 0.92,
       transparent: true,
     })
   );
