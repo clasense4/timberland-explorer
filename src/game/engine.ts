@@ -198,6 +198,7 @@ export class MonsterTruckGameEngine {
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     this.renderer.domElement.style.cursor = 'grab';
+    this.renderer.domElement.style.touchAction = 'none';
     container.appendChild(this.renderer.domElement);
 
     // WebGL context loss & mouse look-around listeners

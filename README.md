@@ -23,7 +23,7 @@ An open-world 3D mountain forest monster truck exploration game for children, bu
 - **3 Camera Presets**: Switch between **Chase**, **Wide**, and **Hood** views.
 - **Live Tachometer & Telemetry HUD**: Analog-style SVG RPM dial with sweeping needle, digital `km/h` speedometer, simulated 4-speed automatic gear indicator (`R`, `1`–`4`), current forest zone name, and star counter.
 - **Random Reset**: Teleport the monster truck to a clean random spot in the valley and shuffle all 12 star locations at any time.
-- **Optional On-Screen Drive Pad**: Built-in touch/mouse steer, brake, and drive pedals alongside full keyboard controls.
+- **Mobile-Ready Touch Drive Pad**: Automatically enables on touch devices with left/right steering arrows on the left and **Honk**, **Turbo**, **Brake**, and **Pedal** icon controls on the right.
 - **100% Procedural Web Audio**: Synthesized engine rumble (tracking speed, throttle, and turbo), two-tone air horn, water splashes, landing thumps, and star collection chimes with a one-click mute toggle.
 
 ## Controls
