@@ -37,7 +37,7 @@ interface HudOverlayProps {
   onVirtualInput: (key: keyof InputState, down: boolean) => void;
 }
 
-const GasPedalIcon: React.FC<{ className?: string }> = ({ className = 'h-7 w-7' }) => (
+const GasPedalIcon: React.FC<{ className?: string }> = ({ className = 'h-6 w-6' }) => (
   <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
     <path
       d="M8.5 3.5h7l1.8 15.5a1.5 1.5 0 0 1-1.5 1.7H8.2a1.5 1.5 0 0 1-1.5-1.7L8.5 3.5Z"
@@ -54,7 +54,7 @@ const GasPedalIcon: React.FC<{ className?: string }> = ({ className = 'h-7 w-7' 
   </svg>
 );
 
-const BrakePedalIcon: React.FC<{ className?: string }> = ({ className = 'h-7 w-7' }) => (
+const BrakePedalIcon: React.FC<{ className?: string }> = ({ className = 'h-6 w-6' }) => (
   <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
     <rect
       x="4.5"
@@ -74,84 +74,67 @@ const BrakePedalIcon: React.FC<{ className?: string }> = ({ className = 'h-7 w-7
   </svg>
 );
 
-const TachometerGauge: React.FC<{ rpm: number; speedKmh: number; gear: number }> = ({
-  rpm,
-  speedKmh,
-  gear,
-}) => {
+const TachometerGauge: React.FC<{ rpm: number; speedKmh: number }> = ({ rpm, speedKmh }) => {
   const maxRpm = 7500;
   const clampedRpm = Math.min(maxRpm, Math.max(0, rpm));
   const ratio = clampedRpm / maxRpm;
   const needleAngle = -125 + ratio * 250;
 
-  const gearLabel = gear === 0 ? 'R' : String(gear);
   const rpmArcLength = 158;
   const activeStroke = ratio * rpmArcLength;
   const arcColor = ratio > 0.82 ? '#ef4444' : ratio > 0.62 ? '#f59e0b' : '#22c55e';
 
   return (
-    <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-      <div className="relative h-[68px] w-[76px] shrink-0 sm:h-[86px] sm:w-[96px]">
-        <svg viewBox="0 0 100 90" className="h-full w-full" aria-hidden="true">
-          <path
-            d="M 20.5 67.5 A 36 36 0 1 1 79.5 67.5"
-            fill="none"
-            stroke="rgba(255,255,255,0.14)"
-            strokeWidth="7"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 20.5 67.5 A 36 36 0 1 1 79.5 67.5"
-            fill="none"
-            stroke={arcColor}
-            strokeWidth="7"
-            strokeLinecap="round"
-            strokeDasharray={`${activeStroke} ${rpmArcLength}`}
-          />
-          {[0, 1, 2, 3, 4, 5, 6, 7].map((tick) => {
-            const tRatio = tick / 7;
-            const deg = (-125 + tRatio * 250 - 90) * (Math.PI / 180);
-            const x1 = 50 + Math.cos(deg) * 29;
-            const y1 = 46 + Math.sin(deg) * 29;
-            const x2 = 50 + Math.cos(deg) * 34;
-            const y2 = 46 + Math.sin(deg) * 34;
-            return (
-              <line
-                key={tick}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke={tick >= 6 ? '#f87171' : 'rgba(255,255,255,0.55)'}
-                strokeWidth="1.6"
-              />
-            );
-          })}
-          <g transform={`rotate(${needleAngle} 50 46)`}>
-            <polygon points="48.5,48 50,15 51.5,48" fill="#fbbf24" />
-            <circle cx="50" cy="46" r="4.2" fill="#f8fafc" />
-          </g>
-        </svg>
+    <div
+      className="relative h-[50px] w-[58px] shrink-0 lg:h-[68px] lg:w-[78px]"
+      aria-label={`${speedKmh} km/h`}
+    >
+      <svg viewBox="0 0 100 90" className="h-full w-full" aria-hidden="true">
+        <path
+          d="M 20.5 67.5 A 36 36 0 1 1 79.5 67.5"
+          fill="none"
+          stroke="rgba(255,255,255,0.14)"
+          strokeWidth="7.5"
+          strokeLinecap="round"
+        />
+        <path
+          d="M 20.5 67.5 A 36 36 0 1 1 79.5 67.5"
+          fill="none"
+          stroke={arcColor}
+          strokeWidth="7.5"
+          strokeLinecap="round"
+          strokeDasharray={`${activeStroke} ${rpmArcLength}`}
+        />
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((tick) => {
+          const tRatio = tick / 7;
+          const deg = (-125 + tRatio * 250 - 90) * (Math.PI / 180);
+          const x1 = 50 + Math.cos(deg) * 28;
+          const y1 = 46 + Math.sin(deg) * 28;
+          const x2 = 50 + Math.cos(deg) * 34;
+          const y2 = 46 + Math.sin(deg) * 34;
+          return (
+            <line
+              key={tick}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke={tick >= 6 ? '#f87171' : 'rgba(255,255,255,0.55)'}
+              strokeWidth="1.8"
+            />
+          );
+        })}
+        <g transform={`rotate(${needleAngle} 50 46)`}>
+          <polygon points="48.5,48 50,15 51.5,48" fill="#fbbf24" />
+          <circle cx="50" cy="46" r="4.4" fill="#f8fafc" />
+        </g>
+      </svg>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0.5 text-center leading-none">
-          <div className="font-mono-tabular text-sm font-bold text-white sm:text-base">
-            {speedKmh}
-          </div>
-          <div className="text-[9px] font-medium text-stone-400 sm:text-[10px]">km/h</div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 text-center leading-none">
+        <div className="font-mono-tabular text-xs font-bold text-white lg:text-sm">
+          {speedKmh}
         </div>
-      </div>
-
-      <div className="flex w-[64px] shrink-0 flex-col justify-center text-[11px] sm:w-[74px] sm:text-xs">
-        <div className="flex items-baseline justify-between gap-1">
-          <span className="font-mono-tabular text-xs font-semibold text-stone-100 sm:text-sm">
-            {clampedRpm}
-          </span>
-          <span className="text-stone-400">RPM</span>
-        </div>
-        <div className="mt-1 flex items-center justify-between gap-1 text-stone-300">
-          <span>Gear</span>
-          <span className="font-mono-tabular font-bold text-amber-300">{gearLabel}</span>
-        </div>
+        <div className="text-[8px] font-medium text-stone-400 lg:text-[9px]">km/h</div>
       </div>
     </div>
   );
@@ -245,19 +228,19 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   });
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2.5 sm:p-5">
-      {/* Top Bar: Responsive Stack on Narrow Portrait, Single Row on Landscape/Desktop */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+    <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2 sm:p-4 lg:p-5">
+      {/* Top Bar: Compact Title, Area, Stars & Tachometer */}
+      <div className="flex items-start justify-between gap-2 sm:gap-4">
         <div
-          className="pointer-events-auto flex w-full items-center justify-between gap-2.5 rounded-xl border border-white/15 px-3 py-2 shadow-lg sm:w-auto sm:justify-start sm:gap-4 sm:px-4 sm:py-2.5"
-          style={{ backgroundColor: 'rgba(15, 24, 19, 0.85)' }}
+          className="pointer-events-auto flex min-w-0 items-center gap-2.5 rounded-xl border border-white/15 px-2.5 py-1.5 shadow-lg sm:gap-3 sm:px-3.5 sm:py-2"
+          style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
         >
           <div className="min-w-0">
-            <h1 className="font-display truncate text-sm font-bold tracking-tight text-stone-50 sm:text-lg">
+            <h1 className="font-display truncate text-xs font-bold tracking-tight text-stone-50 sm:text-sm lg:text-base">
               Timberland Explorer
             </h1>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-300 sm:gap-2 sm:text-sm">
-              <span className="max-w-[96px] truncate font-medium text-amber-300 sm:max-w-[140px]">
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-stone-300 sm:text-xs">
+              <span className="max-w-[92px] truncate font-medium text-amber-300 sm:max-w-[140px]">
                 {hud.zoneName}
               </span>
               <span aria-hidden="true" className="text-stone-500">
@@ -269,16 +252,16 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </div>
           </div>
 
-          <div className="h-10 w-px shrink-0 bg-white/10" />
+          <div className="h-8 w-px shrink-0 bg-white/10 lg:h-10" />
 
-          <TachometerGauge rpm={hud.rpm} speedKmh={hud.speedKmh} gear={hud.gear} />
+          <TachometerGauge rpm={hud.rpm} speedKmh={hud.speedKmh} />
         </div>
 
-        <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 self-end sm:gap-2 sm:self-auto">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={onRecenterCamera}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-1.5 rounded-xl border border-white/15 px-2.5 py-2 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:px-3 sm:text-sm"
+            className="flex min-h-[40px] min-w-[40px] items-center justify-center gap-1.5 rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
             style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
             title="Center camera behind truck"
             aria-label="Center camera behind truck"
@@ -290,7 +273,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           <button
             type="button"
             onClick={() => setTouchPadOpen((prev) => !prev)}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-xl border border-white/15 px-2.5 py-2 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:px-3.5 sm:text-sm"
+            className="flex min-h-[40px] min-w-[40px] items-center justify-center gap-2 rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
             style={{
               backgroundColor: touchPadOpen
                 ? 'rgba(217, 119, 6, 0.88)'
@@ -306,7 +289,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           <button
             type="button"
             onClick={onToggleMute}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-white/15 px-2.5 py-2 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:px-3 sm:text-sm"
+            className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
             style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
             aria-label={muted ? 'Unmute sound' : 'Mute sound'}
           >
@@ -320,33 +303,33 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
       </div>
 
       {/* Bottom Controls Container: Touch Drive Pad + Collapsible Customization Dock */}
-      <div className="pointer-events-none flex flex-col gap-2">
+      <div className="pointer-events-none flex flex-col gap-1.5 sm:gap-2">
         {touchPadOpen && (
-          <div className="pointer-events-none flex items-end justify-between gap-4 px-1 pb-1">
+          <div className="pointer-events-none flex items-end justify-between gap-4 px-1">
             {/* Left Side: Arrow Icon Steering */}
-            <div className="pointer-events-auto flex items-center gap-2.5 sm:gap-3">
+            <div className="pointer-events-auto flex items-center gap-2 sm:gap-3">
               <button
                 type="button"
                 {...bindHold('left')}
-                className="flex h-16 w-16 touch-none select-none items-center justify-center rounded-2xl border border-white/20 text-white shadow-lg transition-transform active:scale-95 sm:h-[70px] sm:w-[70px]"
+                className="flex h-14 w-14 touch-none select-none items-center justify-center rounded-2xl border border-white/20 text-white shadow-lg transition-transform active:scale-95 [@media(max-height:480px)]:h-12 [@media(max-height:480px)]:w-12 sm:h-16 sm:w-16"
                 style={{ backgroundColor: 'rgba(15, 24, 19, 0.86)' }}
                 aria-label="Steer Left"
               >
-                <ArrowLeft className="h-8 w-8" strokeWidth={2.5} />
+                <ArrowLeft className="h-7 w-7" strokeWidth={2.5} />
               </button>
               <button
                 type="button"
                 {...bindHold('right')}
-                className="flex h-16 w-16 touch-none select-none items-center justify-center rounded-2xl border border-white/20 text-white shadow-lg transition-transform active:scale-95 sm:h-[70px] sm:w-[70px]"
+                className="flex h-14 w-14 touch-none select-none items-center justify-center rounded-2xl border border-white/20 text-white shadow-lg transition-transform active:scale-95 [@media(max-height:480px)]:h-12 [@media(max-height:480px)]:w-12 sm:h-16 sm:w-16"
                 style={{ backgroundColor: 'rgba(15, 24, 19, 0.86)' }}
                 aria-label="Steer Right"
               >
-                <ArrowRight className="h-8 w-8" strokeWidth={2.5} />
+                <ArrowRight className="h-7 w-7" strokeWidth={2.5} />
               </button>
             </div>
 
             {/* Right Side: Icon Buttons for Honk, Turbo, Brake & Gas Pedal */}
-            <div className="pointer-events-auto grid grid-cols-2 gap-2 sm:gap-2.5">
+            <div className="pointer-events-auto grid grid-cols-2 gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onPointerDown={(e) => {
@@ -354,49 +337,49 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                   e.stopPropagation();
                   onHonk();
                 }}
-                className="flex h-14 w-16 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-white/20 text-sky-200 shadow-lg transition-transform active:scale-95 sm:h-16 sm:w-[72px]"
+                className="flex h-12 w-14 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-white/20 text-sky-200 shadow-lg transition-transform active:scale-95 [@media(max-height:480px)]:h-11 [@media(max-height:480px)]:w-13 sm:h-14 sm:w-16"
                 style={{ backgroundColor: 'rgba(15, 24, 19, 0.86)' }}
                 aria-label="Honk Horn"
                 title="Honk"
               >
-                <Megaphone className="h-6 w-6" />
-                <span className="text-[10px] font-semibold text-stone-300">Honk</span>
+                <Megaphone className="h-5 w-5" />
+                <span className="text-[9px] font-semibold text-stone-300">Honk</span>
               </button>
 
               <button
                 type="button"
                 {...bindHold('boost')}
-                className="flex h-14 w-16 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-amber-300/45 text-amber-300 shadow-lg transition-transform active:scale-95 sm:h-16 sm:w-[72px]"
+                className="flex h-12 w-14 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-amber-300/45 text-amber-300 shadow-lg transition-transform active:scale-95 [@media(max-height:480px)]:h-11 [@media(max-height:480px)]:w-13 sm:h-14 sm:w-16"
                 style={{ backgroundColor: 'rgba(120, 53, 15, 0.88)' }}
                 aria-label="Turbo Boost"
                 title="Turbo"
               >
-                <Zap className="h-6 w-6" />
-                <span className="text-[10px] font-semibold text-amber-200">Turbo</span>
+                <Zap className="h-5 w-5" />
+                <span className="text-[9px] font-semibold text-amber-200">Turbo</span>
               </button>
 
               <button
                 type="button"
                 {...bindHold('backward')}
-                className="flex h-16 w-16 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-rose-400/35 text-rose-200 shadow-lg transition-transform active:scale-95 sm:h-[70px] sm:w-[72px]"
+                className="flex h-14 w-14 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-rose-400/35 text-rose-200 shadow-lg transition-transform active:scale-95 [@media(max-height:480px)]:h-12 [@media(max-height:480px)]:w-13 sm:h-16 sm:w-16"
                 style={{ backgroundColor: 'rgba(42, 18, 22, 0.88)' }}
                 aria-label="Brake or Reverse"
                 title="Brake"
               >
-                <BrakePedalIcon className="h-7 w-7" />
-                <span className="text-[10px] font-semibold text-rose-200">Brake</span>
+                <BrakePedalIcon className="h-6 w-6" />
+                <span className="text-[9px] font-semibold text-rose-200">Brake</span>
               </button>
 
               <button
                 type="button"
                 {...bindHold('forward')}
-                className="flex h-16 w-16 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-amber-300/50 text-stone-950 shadow-lg transition-transform active:scale-95 sm:h-[70px] sm:w-[72px]"
+                className="flex h-14 w-14 touch-none select-none flex-col items-center justify-center gap-0.5 rounded-2xl border border-amber-300/50 text-stone-950 shadow-lg transition-transform active:scale-95 [@media(max-height:480px)]:h-12 [@media(max-height:480px)]:w-13 sm:h-16 sm:w-16"
                 style={{ backgroundColor: '#f59e0b' }}
                 aria-label="Drive Pedal"
                 title="Pedal"
               >
-                <GasPedalIcon className="h-7 w-7" />
-                <span className="text-[10px] font-bold text-stone-950">Pedal</span>
+                <GasPedalIcon className="h-6 w-6" />
+                <span className="text-[9px] font-bold text-stone-950">Pedal</span>
               </button>
             </div>
           </div>
@@ -407,7 +390,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           <button
             type="button"
             onClick={() => setDockOpen((prev) => !prev)}
-            className="pointer-events-auto mb-1.5 flex items-center gap-1.5 rounded-t-lg rounded-b-md border border-white/15 px-3.5 py-1.5 text-xs font-semibold text-stone-200 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap"
+            className="pointer-events-auto mb-1 flex items-center gap-1.5 rounded-t-lg rounded-b-md border border-white/15 px-3 py-1 text-[11px] font-semibold text-stone-200 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap sm:mb-1.5 sm:px-3.5 sm:py-1.5 sm:text-xs"
             style={{ backgroundColor: 'rgba(15, 24, 19, 0.86)' }}
           >
             {dockOpen ? (

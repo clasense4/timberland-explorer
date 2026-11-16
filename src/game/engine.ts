@@ -162,6 +162,7 @@ export class MonsterTruckGameEngine {
   private disposed = false;
   private hudTimer = 0;
   private particleEmitTimer = 0;
+  private resizeObserver: ResizeObserver | null = null;
   private onHudUpdate: (snapshot: HudSnapshot) => void;
 
   constructor(container: HTMLElement, onHudUpdate: (snapshot: HudSnapshot) => void) {
@@ -309,6 +310,11 @@ export class MonsterTruckGameEngine {
     }
 
     window.addEventListener('resize', this.handleResize);
+    window.addEventListener('orientationchange', this.handleResize);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+      this.resizeObserver.observe(this.container);
+    }
     this.emitHud();
     this.clock.start();
     this.scheduleNextTick();
@@ -746,7 +752,9 @@ export class MonsterTruckGameEngine {
     this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _camDesired.z, dampLambda, dt);
     this.camera.lookAt(_camLookTarget);
 
-    const targetFov = this.input.boost ? 70 : 62 + Math.min(6, Math.abs(this.speed) * 0.22);
+    const isShortLandscape = this.camera.aspect > 1.75 && (this.container.clientHeight || window.innerHeight) < 520;
+    const baseFov = isShortLandscape ? 68 : 62;
+    const targetFov = this.input.boost ? baseFov + 8 : baseFov + Math.min(6, Math.abs(this.speed) * 0.22);
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 6, dt);
       this.camera.updateProjectionMatrix();
@@ -836,6 +844,9 @@ export class MonsterTruckGameEngine {
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
     window.removeEventListener('resize', this.handleResize);
+    window.removeEventListener('orientationchange', this.handleResize);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     window.removeEventListener('pointermove', this.handlePointerMove);
     window.removeEventListener('pointerup', this.handlePointerUp);
     window.removeEventListener('pointercancel', this.handlePointerUp);
