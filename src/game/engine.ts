@@ -125,10 +125,16 @@ export class MonsterTruckGameEngine {
   private steerAngle = 0;
   private wheelSpin = 0;
   private pitchAngle = 0;
+  private pitchVel = 0;
   private rollAngle = 0;
+  private rollVel = 0;
+  private wheelTravel: [number, number, number, number] = [0, 0, 0, 0];
   private chassisBounce = 0;
   private chassisBounceVel = 0;
   private airborne = false;
+  private airTime = 0;
+  private peakFallVel = 0;
+  private prevAvgGroundY = 0;
   private wasInWater = false;
   private rpm = 850;
   private gear = 1;
@@ -262,6 +268,7 @@ export class MonsterTruckGameEngine {
     this.truck = createMonsterTruck(this.textures);
     this.truck.root.scale.setScalar(TRUCK_SCALE);
     this.pos.y = surfaceHeightAt(this.pos.x, this.pos.z);
+    this.prevAvgGroundY = this.pos.y;
     this.truck.root.position.copy(this.pos);
     this.scene.add(this.truck.root);
 
@@ -429,15 +436,24 @@ export class MonsterTruckGameEngine {
   public resetTruck(): void {
     this.audio.unlock();
     const spot = this.worldProps.getRandomSafeSpot(28, WORLD_RADIUS - 65);
-    this.pos.set(spot.x, spot.y + 1.3, spot.z);
+    this.pos.set(spot.x, spot.y + 1.1, spot.z);
     this.yaw = spot.yaw;
     this.velY = 0;
     this.speed = 0;
     this.pitchAngle = 0;
+    this.pitchVel = 0;
     this.rollAngle = 0;
-    this.chassisBounce = 0.25;
+    this.rollVel = 0;
+    this.wheelTravel[0] = 0;
+    this.wheelTravel[1] = 0;
+    this.wheelTravel[2] = 0;
+    this.wheelTravel[3] = 0;
+    this.chassisBounce = 0.22;
     this.chassisBounceVel = 0;
     this.airborne = false;
+    this.airTime = 0;
+    this.peakFallVel = 0;
+    this.prevAvgGroundY = spot.y;
     this.recenterCamera();
 
     // Randomize all star locations on reset too
@@ -494,120 +510,262 @@ export class MonsterTruckGameEngine {
   }
 
   private updatePhysics(dt: number): void {
+    const GRAVITY = 19.6;
+    const REST_SAG = 0.26;
+    const MAX_COMP = 0.54;
+    const SPRING_K = (GRAVITY * 0.25) / REST_SAG;
+    const DAMPER_COMP = 2.4;
+    const DAMPER_REBOUND = 3.1;
+    const halfTrack = 1.62 * TRUCK_SCALE;
+    const halfWheelbase = 1.78 * TRUCK_SCALE;
+
     const maxSpeed = this.input.boost ? 36 : 24;
     const accel = this.input.boost ? 36 : 22;
     const reverseMax = -12;
 
-    if (this.input.forward) {
-      this.speed += accel * dt;
-    } else if (this.input.backward) {
-      if (this.speed > 1.5) {
-        this.speed -= 34 * dt;
-      } else {
-        this.speed -= 16 * dt;
-      }
-    } else {
-      this.speed *= Math.exp(-2.1 * dt);
-      if (Math.abs(this.speed) < 0.08) this.speed = 0;
-    }
-    this.speed = THREE.MathUtils.clamp(this.speed, reverseMax, maxSpeed);
-
     const targetSteer = (this.input.left ? 1 : 0) - (this.input.right ? 1 : 0);
     this.steerAngle = THREE.MathUtils.damp(this.steerAngle, targetSteer * 0.46, 10, dt);
 
-    const speedFactor = Math.min(1, Math.abs(this.speed) / 4.2);
-    const turnDir = this.speed >= -0.2 ? 1 : -1;
-    this.yaw += this.steerAngle * 2.55 * speedFactor * turnDir * dt;
+    const subSteps = Math.max(1, Math.ceil(dt / 0.016));
+    const subDt = dt / subSteps;
 
-    const sinY = Math.sin(this.yaw);
-    const cosY = Math.cos(this.yaw);
-    const fx = -sinY;
-    const fz = -cosY;
-    const rx = cosY;
-    const rz = -sinY;
+    let avgGroundY = this.pos.y;
+    let groundedCount = 4;
+    let maxImpactVel = 0;
+    let compFL = REST_SAG;
+    let compFR = REST_SAG;
+    let compRL = REST_SAG;
+    let compRR = REST_SAG;
 
-    this.pos.x += fx * this.speed * dt;
-    this.pos.z += fz * this.speed * dt;
+    for (let step = 0; step < subSteps; step++) {
+      const sinY = Math.sin(this.yaw);
+      const cosY = Math.cos(this.yaw);
+      const fx = -sinY;
+      const fz = -cosY;
+      const rx = cosY;
+      const rz = -sinY;
 
-    // Gentle tree/boulder deflection
-    const truckRadius = 2.0 * TRUCK_SCALE;
-    const obs = this.worldProps.obstacles;
-    for (let i = 0; i < obs.length; i++) {
-      const o = obs[i];
-      const dx = this.pos.x - o.x;
-      const dz = this.pos.z - o.z;
-      const minD = truckRadius + o.radius;
-      const distSq = dx * dx + dz * dz;
-      if (distSq < minD * minD && distSq > 0.0001) {
-        const dist = Math.sqrt(distSq);
-        const push = minD - dist;
-        this.pos.x += (dx / dist) * push;
-        this.pos.z += (dz / dist) * push;
-        this.speed *= 0.92;
-      }
-    }
+      // Sample drivable terrain/ramps/bridges at the 4 wheel footprints
+      const flX = this.pos.x + fx * halfWheelbase - rx * halfTrack;
+      const flZ = this.pos.z + fz * halfWheelbase - rz * halfTrack;
+      const frX = this.pos.x + fx * halfWheelbase + rx * halfTrack;
+      const frZ = this.pos.z + fz * halfWheelbase + rz * halfTrack;
+      const rlX = this.pos.x - fx * halfWheelbase - rx * halfTrack;
+      const rlZ = this.pos.z - fz * halfWheelbase - rz * halfTrack;
+      const rrX = this.pos.x - fx * halfWheelbase + rx * halfTrack;
+      const rrZ = this.pos.z - fz * halfWheelbase + rz * halfTrack;
 
-    // Soft valley perimeter turn-in
-    const radialDist = Math.hypot(this.pos.x, this.pos.z);
-    if (radialDist > WORLD_RADIUS) {
-      const nx = this.pos.x / radialDist;
-      const nz = this.pos.z / radialDist;
-      this.pos.x = nx * WORLD_RADIUS;
-      this.pos.z = nz * WORLD_RADIUS;
-      this.speed *= 0.85;
-    }
+      const hFL = surfaceHeightAt(flX, flZ);
+      const hFR = surfaceHeightAt(frX, frZ);
+      const hRL = surfaceHeightAt(rlX, rlZ);
+      const hRR = surfaceHeightAt(rrX, rrZ);
+      avgGroundY = (hFL + hFR + hRL + hRR) * 0.25;
 
-    // 4-Wheel terrain sampling scaled to truck dimensions
-    const halfTrack = 1.62 * TRUCK_SCALE;
-    const halfWheelbase = 1.78 * TRUCK_SCALE;
+      const sinPitch = Math.sin(this.pitchAngle);
+      const sinRoll = Math.sin(this.rollAngle);
 
-    const hFL = surfaceHeightAt(this.pos.x + fx * halfWheelbase - rx * halfTrack, this.pos.z + fz * halfWheelbase - rz * halfTrack);
-    const hFR = surfaceHeightAt(this.pos.x + fx * halfWheelbase + rx * halfTrack, this.pos.z + fz * halfWheelbase + rz * halfTrack);
-    const hRL = surfaceHeightAt(this.pos.x - fx * halfWheelbase - rx * halfTrack, this.pos.z - fz * halfWheelbase - rz * halfTrack);
-    const hRR = surfaceHeightAt(this.pos.x - fx * halfWheelbase + rx * halfTrack, this.pos.z - fz * halfWheelbase + rz * halfTrack);
+      // Corner heights relative to truck center (rotation.order = 'YXZ')
+      const yFL = this.pos.y + sinPitch * halfWheelbase - sinRoll * halfTrack;
+      const yFR = this.pos.y + sinPitch * halfWheelbase + sinRoll * halfTrack;
+      const yRL = this.pos.y - sinPitch * halfWheelbase - sinRoll * halfTrack;
+      const yRR = this.pos.y - sinPitch * halfWheelbase + sinRoll * halfTrack;
 
-    const avgGroundY = (hFL + hFR + hRL + hRR) * 0.25;
-    const prevGroundY = surfaceHeightAt(this.pos.x - fx * 0.5, this.pos.z - fz * 0.5);
-    const slopeLaunch = (avgGroundY - prevGroundY) * Math.max(0, this.speed) * 0.45;
+      compFL = REST_SAG + (hFL - yFL);
+      compFR = REST_SAG + (hFR - yFR);
+      compRL = REST_SAG + (hRL - yRL);
+      compRR = REST_SAG + (hRR - yRR);
 
-    if (this.pos.y <= avgGroundY + 0.08 && this.velY <= 0.5) {
-      if (this.airborne) {
-        const impact = Math.min(1.5, Math.abs(this.velY) * 0.12);
-        this.chassisBounceVel -= impact * 4.5;
-        if (impact > 0.25) {
-          this.audio.playLandingThump(impact);
+      // Corner vertical velocities
+      const vFL = this.velY + this.pitchVel * halfWheelbase - this.rollVel * halfTrack;
+      const vFR = this.velY + this.pitchVel * halfWheelbase + this.rollVel * halfTrack;
+      const vRL = this.velY - this.pitchVel * halfWheelbase - this.rollVel * halfTrack;
+      const vRR = this.velY - this.pitchVel * halfWheelbase + this.rollVel * halfTrack;
+
+      // 4-corner spring-damper forces (0 when wheel droops clear of ground)
+      const fFL = compFL > 0 ? Math.max(0, SPRING_K * compFL - (vFL < 0 ? DAMPER_COMP : DAMPER_REBOUND) * vFL) : 0;
+      const fFR = compFR > 0 ? Math.max(0, SPRING_K * compFR - (vFR < 0 ? DAMPER_COMP : DAMPER_REBOUND) * vFR) : 0;
+      const fRL = compRL > 0 ? Math.max(0, SPRING_K * compRL - (vRL < 0 ? DAMPER_COMP : DAMPER_REBOUND) * vRL) : 0;
+      const fRR = compRR > 0 ? Math.max(0, SPRING_K * compRR - (vRR < 0 ? DAMPER_COMP : DAMPER_REBOUND) * vRR) : 0;
+
+      const gFL = compFL > 0 ? 1 : 0;
+      const gFR = compFR > 0 ? 1 : 0;
+      const gRL = compRL > 0 ? 1 : 0;
+      const gRR = compRR > 0 ? 1 : 0;
+      groundedCount = gFL + gFR + gRL + gRR;
+      const groundedRatio = groundedCount * 0.25;
+      const frontGrounded = gFL + gFR;
+      const rearGrounded = gRL + gRR;
+
+      // Ground-coupled drive acceleration, rolling/air drag, slope gravity & steering
+      const driveTraction = groundedCount > 0 ? 0.35 + 0.65 * groundedRatio : 0;
+      if (this.input.forward) {
+        this.speed += accel * driveTraction * subDt;
+      } else if (this.input.backward) {
+        if (this.speed > 1.5) {
+          this.speed -= 34 * driveTraction * subDt;
+        } else {
+          this.speed -= 16 * driveTraction * subDt;
         }
-        this.airborne = false;
-      }
-      this.pos.y = avgGroundY;
-      if (slopeLaunch > 3.0 && this.speed > 12) {
-        this.velY = Math.min(12.0, slopeLaunch * 1.15);
-        this.airborne = true;
       } else {
-        this.velY = 0;
+        const dragRate = groundedCount > 0 ? 1.95 * groundedRatio + 0.15 : 0.16;
+        this.speed *= Math.exp(-dragRate * subDt);
+        if (groundedCount > 0 && Math.abs(this.speed) < 0.08) this.speed = 0;
+      }
+
+      if (groundedCount > 0) {
+        // Gentle hill gravity pull on slopes without stalling climbs
+        this.speed -= GRAVITY * sinPitch * groundedRatio * 0.32 * subDt;
+      }
+      this.speed = THREE.MathUtils.clamp(this.speed, reverseMax, maxSpeed);
+
+      const speedFactor = Math.min(1, Math.abs(this.speed) / 4.2);
+      const turnDir = this.speed >= -0.2 ? 1 : -1;
+      const steerTraction = groundedCount > 0 ? 0.3 + 0.7 * groundedRatio : 0.05;
+      this.yaw += this.steerAngle * 2.55 * speedFactor * turnDir * steerTraction * subDt;
+
+      const nSinY = Math.sin(this.yaw);
+      const nCosY = Math.cos(this.yaw);
+      const nFx = -nSinY;
+      const nFz = -nCosY;
+
+      this.pos.x += nFx * this.speed * subDt;
+      this.pos.z += nFz * this.speed * subDt;
+
+      // Gentle tree/boulder deflection
+      const truckRadius = 2.0 * TRUCK_SCALE;
+      const obs = this.worldProps.obstacles;
+      for (let i = 0; i < obs.length; i++) {
+        const o = obs[i];
+        const dx = this.pos.x - o.x;
+        const dz = this.pos.z - o.z;
+        const minD = truckRadius + o.radius;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < minD * minD && distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          const push = minD - dist;
+          this.pos.x += (dx / dist) * push;
+          this.pos.z += (dz / dist) * push;
+          this.speed *= 0.94;
+        }
+      }
+
+      // Soft valley perimeter turn-in
+      const radialDist = Math.hypot(this.pos.x, this.pos.z);
+      if (radialDist > WORLD_RADIUS) {
+        const nx = this.pos.x / radialDist;
+        const nz = this.pos.z / radialDist;
+        this.pos.x = nx * WORLD_RADIUS;
+        this.pos.z = nz * WORLD_RADIUS;
+        this.speed *= 0.88;
+      }
+
+      // Vertical spring integration + ballistic gravity
+      const totalSpringAccel = fFL + fFR + fRL + fRR;
+      this.velY += (totalSpringAccel - GRAVITY) * subDt;
+      this.pos.y += this.velY * subDt;
+
+      // Pitch & roll rotational dynamics from suspension forces + cornering body lean + air attitude control
+      let rawPitchForce = (fFL + fFR) - (fRL + fRR);
+      // Avoid premature nose-dive when front wheels clear a ramp lip while climbing
+      if (frontGrounded === 0 && rearGrounded > 0 && this.velY > 1.2 && rawPitchForce < 0) {
+        rawPitchForce *= 0.25;
+      }
+      const airNoseControl =
+        groundedCount === 0
+          ? (this.input.forward ? 1.15 : 0) + (this.input.backward ? -1.45 : 0) - 0.16
+          : 0;
+      const driveSquat = groundedCount > 0 && this.input.forward ? 1.35 * groundedRatio : 0;
+      const pitchAccel = rawPitchForce * 0.44 - this.pitchVel * (groundedCount > 0 ? 5.2 : 1.8) + airNoseControl + driveSquat;
+      this.pitchVel += pitchAccel * subDt;
+      this.pitchAngle = THREE.MathUtils.clamp(this.pitchAngle + this.pitchVel * subDt, -0.56, 0.56);
+      if (Math.abs(this.pitchAngle) >= 0.559) this.pitchVel *= 0.4;
+
+      const rawRollForce = (fFR + fRR) - (fFL + fRL);
+      const turnCentrifugalRoll = -this.steerAngle * (this.speed / 24) * 3.2 * groundedRatio;
+      const rollAccel = rawRollForce * 0.48 + turnCentrifugalRoll - this.rollVel * (groundedCount > 0 ? 5.8 : 2.2);
+      this.rollVel += rollAccel * subDt;
+      this.rollAngle = THREE.MathUtils.clamp(this.rollAngle + this.rollVel * subDt, -0.42, 0.42);
+      if (Math.abs(this.rollAngle) >= 0.419) this.rollVel *= 0.4;
+
+      // Bump-stop constraint so chassis/tires never clip into terrain or ramp surfaces
+      const maxSink = MAX_COMP - REST_SAG;
+      const sinP2 = Math.sin(this.pitchAngle);
+      const sinR2 = Math.sin(this.rollAngle);
+      const cYFL = this.pos.y + sinP2 * halfWheelbase - sinR2 * halfTrack;
+      const cYFR = this.pos.y + sinP2 * halfWheelbase + sinR2 * halfTrack;
+      const cYRL = this.pos.y - sinP2 * halfWheelbase - sinR2 * halfTrack;
+      const cYRR = this.pos.y - sinP2 * halfWheelbase + sinR2 * halfTrack;
+
+      const penFL = hFL - maxSink - cYFL;
+      const penFR = hFR - maxSink - cYFR;
+      const penRL = hRL - maxSink - cYRL;
+      const penRR = hRR - maxSink - cYRR;
+      const maxPen = Math.max(penFL, penFR, penRL, penRR);
+
+      const groundRiseVel = THREE.MathUtils.clamp((avgGroundY - this.prevAvgGroundY) / subDt, 0, 14);
+      this.prevAvgGroundY = avgGroundY;
+
+      if (maxPen > 0) {
+        this.pos.y += maxPen;
+        if (this.velY < -maxImpactVel) {
+          maxImpactVel = -this.velY;
+        }
+        if (this.velY < 0) {
+          // Cushion bump-stop bounce with realistic tire rebound
+          this.velY = Math.max(0, -this.velY * 0.14);
+        } else if (groundedCount >= 2 && groundRiseVel > 1.0) {
+          // Ramp/crest upward deflection follows the ramp slope at high speed
+          this.velY = Math.max(this.velY, groundRiseVel * 0.92);
+        }
+        // Align pitch on hard axle bump-stop hits
+        if (penFL > 0 || penFR > 0) {
+          this.pitchVel += Math.max(penFL, penFR) * 4.5;
+        }
+        if (penRL > 0 || penRR > 0) {
+          this.pitchVel -= Math.max(penRL, penRR) * 4.5;
+        }
+      }
+    }
+
+    // Airborne state & touchdown impact feedback
+    if (groundedCount === 0) {
+      this.airTime += dt;
+      if (this.velY < 0 && -this.velY > this.peakFallVel) {
+        this.peakFallVel = -this.velY;
       }
     } else {
-      this.airborne = true;
-      this.velY -= 21.5 * dt;
-      this.pos.y += this.velY * dt;
-      if (this.pos.y <= avgGroundY) {
-        const impact = Math.min(1.6, Math.abs(this.velY) * 0.12);
-        this.chassisBounceVel -= impact * 4.8;
-        if (impact > 0.25) {
+      const impactVel = Math.max(maxImpactVel, this.peakFallVel);
+      if (this.airborne && (impactVel > 1.8 || this.airTime > 0.22)) {
+        const impact = Math.min(1.6, Math.max(impactVel, this.airTime * 6.0) * 0.13);
+        this.chassisBounceVel -= impact * 4.6;
+        if (impact > 0.22) {
           this.audio.playLandingThump(impact);
         }
-        this.pos.y = avgGroundY;
-        this.velY = 0;
-        this.airborne = false;
+        // Landing dust / water splash burst around all 4 tires
+        const sinY = Math.sin(this.yaw);
+        const cosY = Math.cos(this.yaw);
+        const fx = -sinY;
+        const fz = -cosY;
+        const rx = cosY;
+        const rz = -sinY;
+        const inCreek = groundHeightAt(this.pos.x, this.pos.z) < WATER_LEVEL + 0.15;
+        for (let b = 0; b < 8; b++) {
+          const side = b % 2 === 0 ? -1 : 1;
+          const end = b < 4 ? 1 : -1;
+          this.emitParticle(
+            this.pos.x + fx * halfWheelbase * end + rx * halfTrack * side,
+            this.pos.y + 0.15,
+            this.pos.z + fz * halfWheelbase * end + rz * halfTrack * side,
+            inCreek
+          );
+        }
       }
+      this.airTime = 0;
+      this.peakFallVel = 0;
     }
 
-    const targetPitch = Math.atan2((hFL + hFR) * 0.5 - (hRL + hRR) * 0.5, halfWheelbase * 2);
-    const targetRoll = Math.atan2((hRL + hFL) * 0.5 - (hRR + hFR) * 0.5, halfTrack * 2);
-    const turnBodyRoll = -this.steerAngle * (this.speed / 26) * 0.14;
-
-    this.pitchAngle = THREE.MathUtils.damp(this.pitchAngle, targetPitch, 9, dt);
-    this.rollAngle = THREE.MathUtils.damp(this.rollAngle, targetRoll + turnBodyRoll, 9, dt);
+    const heightAboveGround = Math.max(0, this.pos.y - avgGroundY);
+    this.airborne = groundedCount === 0 && (heightAboveGround > 0.26 || this.airTime > 0.09);
 
     const springForce = -72 * this.chassisBounce - 9.5 * this.chassisBounceVel;
     this.chassisBounceVel += springForce * dt;
@@ -619,8 +777,46 @@ export class MonsterTruckGameEngine {
     this.truck.root.rotation.set(this.pitchAngle, this.yaw, this.rollAngle);
     this.truck.chassisGroup.position.y = this.chassisBounce;
 
+    // Independent 4-wheel suspension travel (droops in air, compresses over bumps/landings)
+    this.wheelTravel[0] = THREE.MathUtils.damp(
+      this.wheelTravel[0],
+      THREE.MathUtils.clamp((compFL - REST_SAG) / TRUCK_SCALE, -0.38, 0.34),
+      24,
+      dt
+    );
+    this.wheelTravel[1] = THREE.MathUtils.damp(
+      this.wheelTravel[1],
+      THREE.MathUtils.clamp((compFR - REST_SAG) / TRUCK_SCALE, -0.38, 0.34),
+      24,
+      dt
+    );
+    this.wheelTravel[2] = THREE.MathUtils.damp(
+      this.wheelTravel[2],
+      THREE.MathUtils.clamp((compRL - REST_SAG) / TRUCK_SCALE, -0.38, 0.34),
+      24,
+      dt
+    );
+    this.wheelTravel[3] = THREE.MathUtils.damp(
+      this.wheelTravel[3],
+      THREE.MathUtils.clamp((compRR - REST_SAG) / TRUCK_SCALE, -0.38, 0.34),
+      24,
+      dt
+    );
+    this.truck.wheelPivots.fl.position.y = this.truck.wheelRadius + this.wheelTravel[0];
+    this.truck.wheelPivots.fr.position.y = this.truck.wheelRadius + this.wheelTravel[1];
+    this.truck.wheelPivots.rl.position.y = this.truck.wheelRadius + this.wheelTravel[2];
+    this.truck.wheelPivots.rr.position.y = this.truck.wheelRadius + this.wheelTravel[3];
+
     const scaledWheelR = this.truck.wheelRadius * TRUCK_SCALE;
-    this.wheelSpin -= (this.speed / scaledWheelR) * dt;
+    if (groundedCount > 0) {
+      this.wheelSpin -= (this.speed / scaledWheelR) * dt;
+    } else if (this.input.forward) {
+      this.wheelSpin -= (this.input.boost ? 28 : 19) * dt;
+    } else if (this.input.backward) {
+      this.wheelSpin += 9 * dt;
+    } else {
+      this.wheelSpin -= (this.speed / scaledWheelR) * 0.45 * dt;
+    }
     this.truck.wheelPivots.fl.rotation.y = this.steerAngle;
     this.truck.wheelPivots.fr.rotation.y = this.steerAngle;
     this.truck.wheelSpinners.fl.rotation.x = this.wheelSpin;
@@ -628,10 +824,11 @@ export class MonsterTruckGameEngine {
     this.truck.wheelSpinners.rl.rotation.x = this.wheelSpin;
     this.truck.wheelSpinners.rr.rotation.x = this.wheelSpin;
 
-    const heightAboveGround = Math.max(0, this.pos.y - avgGroundY);
     const shadowScale = Math.max(0.55, 1 - heightAboveGround * 0.08);
     this.truck.contactShadow.scale.set(shadowScale, 1, shadowScale);
-    this.truck.contactShadow.position.y = 0.05 - heightAboveGround * 0.85;
+    this.truck.contactShadow.position.y = 0.05 - heightAboveGround / TRUCK_SCALE;
+    const shadowMat = this.truck.contactShadow.material as THREE.MeshBasicMaterial;
+    shadowMat.opacity = Math.max(0.1, 0.55 - heightAboveGround * 0.08);
 
     // Simulated 4-speed automatic gearbox + Tachometer RPM
     const absSpeed = Math.abs(this.speed);
@@ -662,15 +859,21 @@ export class MonsterTruckGameEngine {
 
     // Creek splash & dust particles
     const baseTerrainY = groundHeightAt(this.pos.x, this.pos.z);
-    const inWater = !this.airborne && baseTerrainY < WATER_LEVEL + 0.05 && this.pos.y < WATER_LEVEL + 0.4;
+    const inWater = groundedCount > 0 && baseTerrainY < WATER_LEVEL + 0.05 && this.pos.y < WATER_LEVEL + 0.4;
     if (inWater && !this.wasInWater && absSpeed > 3.5) {
       this.audio.playSplash();
     }
     this.wasInWater = inWater;
 
     this.particleEmitTimer += dt;
-    if (!this.airborne && absSpeed > 3.5 && this.particleEmitTimer > 0.045) {
+    if (groundedCount > 0 && absSpeed > 3.5 && this.particleEmitTimer > 0.045) {
       this.particleEmitTimer = 0;
+      const sinY = Math.sin(this.yaw);
+      const cosY = Math.cos(this.yaw);
+      const fx = -sinY;
+      const fz = -cosY;
+      const rx = cosY;
+      const rz = -sinY;
       const rearDist = 1.8 * TRUCK_SCALE;
       const sideDist = 1.5 * TRUCK_SCALE;
       const rearLx = this.pos.x - fx * rearDist - rx * sideDist;
