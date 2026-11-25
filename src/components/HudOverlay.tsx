@@ -5,11 +5,15 @@ import {
   Camera,
   ChevronDown,
   ChevronUp,
+  Compass,
   Gamepad2,
   Megaphone,
   RotateCcw,
+  Sparkles,
+  Trophy,
   Volume2,
   VolumeX,
+  Waves,
   Zap,
 } from 'lucide-react';
 import {
@@ -20,6 +24,8 @@ import {
   type TimeOfDay,
   type TruckColorId,
 } from '../game/types';
+import { BigMapModal } from './BigMapModal';
+import { MiniMapRadar } from './MiniMapRadar';
 
 interface HudOverlayProps {
   hud: HudSnapshot;
@@ -27,13 +33,17 @@ interface HudOverlayProps {
   timeOfDay: TimeOfDay;
   cameraMode: CameraMode;
   muted: boolean;
+  bigMapOpen: boolean;
   onSelectColor: (color: TruckColorId) => void;
   onSelectTimeOfDay: (time: TimeOfDay) => void;
   onSelectCamera: (mode: CameraMode) => void;
   onRecenterCamera: () => void;
   onToggleMute: () => void;
+  onToggleHelper: () => void;
+  onSetBigMapOpen: (open: boolean) => void;
   onHonk: () => void;
   onReset: () => void;
+  onDismissCelebration: () => void;
   onVirtualInput: (key: keyof InputState, down: boolean) => void;
 }
 
@@ -146,13 +156,17 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
   timeOfDay,
   cameraMode,
   muted,
+  bigMapOpen,
   onSelectColor,
   onSelectTimeOfDay,
   onSelectCamera,
   onRecenterCamera,
   onToggleMute,
+  onToggleHelper,
+  onSetBigMapOpen,
   onHonk,
   onReset,
+  onDismissCelebration,
   onVirtualInput,
 }) => {
   const isMobileDefault =
@@ -229,78 +243,164 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-2 sm:p-4 lg:p-5">
-      {/* Top Bar: Compact Title, Area, Stars & Tachometer */}
+      {/* Top Bar: Compact Title, Area, Stars & Tachometer + Top-Right Actions & Mini-Map Radar */}
       <div className="flex items-start justify-between gap-2 sm:gap-4">
-        <div
-          className="pointer-events-auto flex min-w-0 items-center gap-2.5 rounded-xl border border-white/15 px-2.5 py-1.5 shadow-lg sm:gap-3 sm:px-3.5 sm:py-2"
-          style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
-        >
-          <div className="min-w-0">
-            <h1 className="font-display truncate text-xs font-bold tracking-tight text-stone-50 sm:text-sm lg:text-base">
-              Timberland Explorer
-            </h1>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-stone-300 sm:text-xs">
-              <span className="max-w-[92px] truncate font-medium text-amber-300 sm:max-w-[140px]">
-                {hud.zoneName}
-              </span>
-              <span aria-hidden="true" className="text-stone-500">
-                ·
-              </span>
-              <span className="font-mono-tabular shrink-0 whitespace-nowrap text-amber-200">
-                {hud.starsCollected}/{hud.totalStars} Stars
-              </span>
+        <div className="flex flex-col items-start gap-1.5">
+          <div
+            className="pointer-events-auto flex min-w-0 items-center gap-2.5 rounded-xl border border-white/15 px-2.5 py-1.5 shadow-lg sm:gap-3 sm:px-3.5 sm:py-2"
+            style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
+          >
+            <div className="min-w-0">
+              <h1 className="font-display truncate text-xs font-bold tracking-tight text-stone-50 sm:text-sm lg:text-base">
+                Timberland Explorer
+              </h1>
+              <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-stone-300 sm:text-xs">
+                <span className="max-w-[92px] truncate font-medium text-amber-300 sm:max-w-[140px]">
+                  {hud.zoneName}
+                </span>
+                <span aria-hidden="true" className="text-stone-500">
+                  ·
+                </span>
+                <span className="font-mono-tabular shrink-0 whitespace-nowrap text-amber-200">
+                  {hud.starsCollected}/{hud.totalStars} Stars
+                </span>
+              </div>
             </div>
+
+            <div className="h-8 w-px shrink-0 bg-white/10 lg:h-10" />
+
+            <TachometerGauge rpm={hud.rpm} speedKmh={hud.speedKmh} />
           </div>
 
-          <div className="h-8 w-px shrink-0 bg-white/10 lg:h-10" />
-
-          <TachometerGauge rpm={hud.rpm} speedKmh={hud.speedKmh} />
+          {hud.inWater && (
+            <div
+              className="flex items-center gap-1.5 rounded-lg border border-sky-300/40 px-2.5 py-1 text-[11px] font-bold text-sky-200 shadow-md"
+              style={{ backgroundColor: 'rgba(12, 74, 110, 0.85)' }}
+            >
+              <Waves className="h-3.5 w-3.5 text-sky-300" />
+              <span>SPLASH!</span>
+            </div>
+          )}
         </div>
 
-        <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <button
-            type="button"
-            onClick={onRecenterCamera}
-            className="flex min-h-[40px] min-w-[40px] items-center justify-center gap-1.5 rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
-            style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
-            title="Center camera behind truck"
-            aria-label="Center camera behind truck"
-          >
-            <Camera className="h-4 w-4 shrink-0 text-stone-300" />
-            <span className="hidden md:inline">Center View</span>
-          </button>
+        <div className="flex shrink-0 flex-col items-end gap-1.5 sm:gap-2">
+          <div className="pointer-events-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={onToggleHelper}
+              className={`flex min-h-[40px] min-w-[40px] items-center justify-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3 ${
+                hud.helperMode
+                  ? 'border-amber-300 text-stone-950'
+                  : 'border-white/15 text-stone-100 hover:bg-white/15'
+              }`}
+              style={{
+                backgroundColor: hud.helperMode ? '#facc15' : 'rgba(15, 24, 19, 0.84)',
+              }}
+              aria-pressed={hud.helperMode}
+              title="Helper Mode: Star Beacons & Guide Arrow (G)"
+              aria-label="Toggle Helper Mode to find stars"
+            >
+              <Compass
+                className={`h-4 w-4 shrink-0 ${
+                  hud.helperMode ? 'text-stone-950' : 'text-amber-300'
+                }`}
+              />
+              <span className="hidden md:inline">
+                {hud.helperMode ? 'Helper ON' : 'Helper'}
+              </span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setTouchPadOpen((prev) => !prev)}
-            className="flex min-h-[40px] min-w-[40px] items-center justify-center gap-2 rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
-            style={{
-              backgroundColor: touchPadOpen
-                ? 'rgba(217, 119, 6, 0.88)'
-                : 'rgba(15, 24, 19, 0.84)',
-            }}
-            aria-pressed={touchPadOpen}
-            aria-label="Toggle on-screen drive pad"
-          >
-            <Gamepad2 className="h-4 w-4 shrink-0" />
-            <span className="hidden md:inline">Drive Pad</span>
-          </button>
+            <button
+              type="button"
+              onClick={onRecenterCamera}
+              className="flex min-h-[40px] min-w-[40px] items-center justify-center gap-1.5 rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
+              style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
+              title="Center camera behind truck"
+              aria-label="Center camera behind truck"
+            >
+              <Camera className="h-4 w-4 shrink-0 text-stone-300" />
+              <span className="hidden md:inline">Center View</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={onToggleMute}
-            className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
-            style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
-            aria-label={muted ? 'Unmute sound' : 'Mute sound'}
-          >
-            {muted ? (
-              <VolumeX className="h-4 w-4 text-rose-300" />
-            ) : (
-              <Volume2 className="h-4 w-4 text-emerald-300" />
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={() => setTouchPadOpen((prev) => !prev)}
+              className="flex min-h-[40px] min-w-[40px] items-center justify-center gap-2 rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
+              style={{
+                backgroundColor: touchPadOpen
+                  ? 'rgba(217, 119, 6, 0.88)'
+                  : 'rgba(15, 24, 19, 0.84)',
+              }}
+              aria-pressed={touchPadOpen}
+              aria-label="Toggle on-screen drive pad"
+            >
+              <Gamepad2 className="h-4 w-4 shrink-0" />
+              <span className="hidden md:inline">Drive Pad</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleMute}
+              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-amber-400 whitespace-nowrap shrink-0 sm:min-h-[42px] sm:px-3"
+              style={{ backgroundColor: 'rgba(15, 24, 19, 0.84)' }}
+              aria-label={muted ? 'Unmute sound' : 'Mute sound'}
+            >
+              {muted ? (
+                <VolumeX className="h-4 w-4 text-rose-300" />
+              ) : (
+                <Volume2 className="h-4 w-4 text-emerald-300" />
+              )}
+            </button>
+          </div>
+
+          <MiniMapRadar
+            truckX={hud.truckX}
+            truckZ={hud.truckZ}
+            truckYaw={hud.truckYaw}
+            uncollectedStars={hud.uncollectedStars}
+            helperMode={hud.helperMode}
+            onOpenBigMap={() => onSetBigMapOpen(true)}
+          />
         </div>
       </div>
+
+      {/* Fireworks All-Stars Celebration Banner */}
+      {hud.celebrating && (
+        <div className="pointer-events-none fixed inset-x-0 top-16 z-20 flex justify-center px-3 sm:top-20">
+          <div
+            className="pointer-events-auto flex max-w-md flex-col items-center gap-2 rounded-2xl border-2 border-amber-300/70 px-5 py-3.5 text-center shadow-2xl"
+            style={{ backgroundColor: 'rgba(15, 24, 19, 0.92)' }}
+          >
+            <div className="flex items-center gap-2 text-amber-300">
+              <Trophy className="h-6 w-6 shrink-0" />
+              <span className="font-display text-base font-extrabold tracking-tight text-white sm:text-lg">
+                All {hud.totalStars} Stars Found!
+              </span>
+              <Sparkles className="h-5 w-5 shrink-0" />
+            </div>
+            <p className="text-xs text-stone-200 sm:text-sm">
+              Amazing driving! Ready for new stars in a fresh spot?
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onReset}
+                className="flex min-h-[38px] items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-1.5 text-xs font-extrabold text-stone-950 shadow transition-colors hover:bg-amber-300 sm:text-sm"
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span>Play Again!</span>
+              </button>
+              <button
+                type="button"
+                onClick={onDismissCelebration}
+                className="min-h-[38px] rounded-xl border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-stone-100 transition-colors hover:bg-white/20 sm:text-sm"
+              >
+                Keep Exploring
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Controls Container: Touch Drive Pad + Collapsible Customization Dock */}
       <div className="pointer-events-none flex flex-col gap-1.5 sm:gap-2">
@@ -510,12 +610,24 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
               {/* Quiet Single-Line Legend */}
               <div className="mt-2 hidden border-t border-white/10 pt-1.5 text-center text-xs text-stone-300 sm:block">
-                Drive: WASD / Arrows · Look around: Drag mouse &amp; scroll to zoom · Turbo: Space · Honk: H · Random Spot &amp; Stars: R
+                Drive: WASD / Arrows · Look: Drag mouse &amp; scroll · Turbo: Space · Honk: H · Map: M · Helper: G · Reset: R
               </div>
             </div>
           )}
         </div>
       </div>
+
+      <BigMapModal
+        open={bigMapOpen}
+        truckX={hud.truckX}
+        truckZ={hud.truckZ}
+        truckYaw={hud.truckYaw}
+        uncollectedStars={hud.uncollectedStars}
+        totalStars={hud.totalStars}
+        helperMode={hud.helperMode}
+        onToggleHelper={onToggleHelper}
+        onClose={() => onSetBigMapOpen(false)}
+      />
     </div>
   );
 };

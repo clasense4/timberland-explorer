@@ -90,6 +90,33 @@ interface ParticleItem {
   life: number;
   maxLife: number;
   isWater: boolean;
+  r: number;
+  g: number;
+  b: number;
+}
+
+interface WaterRippleItem {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  active: boolean;
+  life: number;
+  maxLife: number;
+  maxScale: number;
+}
+
+interface FireworkItem {
+  active: boolean;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  life: number;
+  maxLife: number;
+  r: number;
+  g: number;
+  b: number;
 }
 
 export class MonsterTruckGameEngine {
@@ -108,14 +135,33 @@ export class MonsterTruckGameEngine {
   private worldProps: ReturnType<typeof createWorldProps>;
   public audio: ProceduralAudio;
 
-  // Particle pool for tire dust & water splashes
-  private readonly PARTICLE_MAX = 140;
+  // Particle pool for tire dust, water splashes & prop smash sparks
+  private readonly PARTICLE_MAX = 180;
   private particles: ParticleItem[] = [];
   private particleGeo: THREE.BufferGeometry;
   private particlePositions: Float32Array;
   private particleColors: Float32Array;
   private particleMat: THREE.PointsMaterial;
   private particleCursor = 0;
+
+  // Expanding 3D water ripple rings pool
+  private rippleGeo: THREE.RingGeometry;
+  private ripples: WaterRippleItem[] = [];
+  private rippleCursor = 0;
+  private waterRippleTimer = 0;
+
+  // Sky fireworks particle pool (triggered on collecting all stars)
+  private readonly FIREWORK_MAX = 220;
+  private fireworks: FireworkItem[] = [];
+  private fireworkGeo: THREE.BufferGeometry;
+  private fireworkPositions: Float32Array;
+  private fireworkColors: Float32Array;
+  private fireworkMat: THREE.PointsMaterial;
+  private fireworkCursor = 0;
+  private celebrating = false;
+  private celebrationTriggered = false;
+  private fireworkShowTimer = 0;
+  private fireworkBurstTimer = 0;
 
   // Vehicle state
   private pos = new THREE.Vector3(0, 1.5, 8);
@@ -159,6 +205,12 @@ export class MonsterTruckGameEngine {
   private cameraMode: CameraMode = 'chase';
   private timeOfDay: TimeOfDay = 'morning';
   private starsCollected = 0;
+  private helperMode = false;
+  private helperArrowGroup: THREE.Group;
+  private helperArrowGeo1: THREE.BufferGeometry;
+  private helperArrowGeo2: THREE.BufferGeometry;
+  private helperArrowMat: THREE.MeshStandardMaterial;
+  private helperArrowYaw = 0;
   private webglLost = false;
 
   // Loop & lifecycle
@@ -168,6 +220,7 @@ export class MonsterTruckGameEngine {
   private disposed = false;
   private hudTimer = 0;
   private particleEmitTimer = 0;
+  private animalCheckTimer = 0;
   private resizeObserver: ResizeObserver | null = null;
   private onHudUpdate: (snapshot: HudSnapshot) => void;
 
@@ -275,7 +328,7 @@ export class MonsterTruckGameEngine {
     this.worldProps = createWorldProps(this.textures);
     this.scene.add(this.worldProps.group);
 
-    // 6. Particle Pool Setup
+    // 6. Particle Pool, Water Ripple Pool & Sky Firework Pool Setup
     this.particlePositions = new Float32Array(this.PARTICLE_MAX * 3);
     this.particleColors = new Float32Array(this.PARTICLE_MAX * 3);
     for (let i = 0; i < this.PARTICLE_MAX; i++) {
@@ -290,6 +343,9 @@ export class MonsterTruckGameEngine {
         life: 0,
         maxLife: 1,
         isWater: false,
+        r: 0.78,
+        g: 0.68,
+        b: 0.52,
       });
       this.particlePositions[i * 3 + 1] = -999;
     }
@@ -297,16 +353,101 @@ export class MonsterTruckGameEngine {
     this.particleGeo.setAttribute('position', new THREE.BufferAttribute(this.particlePositions, 3));
     this.particleGeo.setAttribute('color', new THREE.BufferAttribute(this.particleColors, 3));
     this.particleMat = new THREE.PointsMaterial({
-      size: 1.25,
+      size: 1.45,
       map: this.textures.particleMap,
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.82,
       depthWrite: false,
     });
     const particlePoints = new THREE.Points(this.particleGeo, this.particleMat);
     particlePoints.frustumCulled = false;
     this.scene.add(particlePoints);
+
+    // Expanding water ripple rings
+    this.rippleGeo = new THREE.RingGeometry(0.42, 0.78, 24);
+    this.rippleGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 14; i++) {
+      const rMat = new THREE.MeshBasicMaterial({
+        color: 0xe0f7ff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const rMesh = new THREE.Mesh(this.rippleGeo, rMat);
+      rMesh.visible = false;
+      rMesh.position.set(0, WATER_LEVEL + 0.05, 0);
+      this.scene.add(rMesh);
+      this.ripples.push({
+        mesh: rMesh,
+        mat: rMat,
+        active: false,
+        life: 0,
+        maxLife: 0.9,
+        maxScale: 5.0,
+      });
+    }
+
+    // Sky Fireworks sparks
+    this.fireworkPositions = new Float32Array(this.FIREWORK_MAX * 3);
+    this.fireworkColors = new Float32Array(this.FIREWORK_MAX * 3);
+    for (let i = 0; i < this.FIREWORK_MAX; i++) {
+      this.fireworks.push({
+        active: false,
+        x: 0,
+        y: -999,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        life: 0,
+        maxLife: 1.2,
+        r: 1,
+        g: 0.8,
+        b: 0.2,
+      });
+      this.fireworkPositions[i * 3 + 1] = -999;
+    }
+    this.fireworkGeo = new THREE.BufferGeometry();
+    this.fireworkGeo.setAttribute('position', new THREE.BufferAttribute(this.fireworkPositions, 3));
+    this.fireworkGeo.setAttribute('color', new THREE.BufferAttribute(this.fireworkColors, 3));
+    this.fireworkMat = new THREE.PointsMaterial({
+      size: 2.1,
+      map: this.textures.particleMap,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const fireworkPoints = new THREE.Points(this.fireworkGeo, this.fireworkMat);
+    fireworkPoints.frustumCulled = false;
+    this.scene.add(fireworkPoints);
+
+    // 7. Helper Mode 3D Floating Guide Arrow (hovers above truck pointing to nearest star)
+    this.helperArrowGroup = new THREE.Group();
+    this.helperArrowMat = new THREE.MeshStandardMaterial({
+      color: 0xfde047,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.92,
+      roughness: 0.2,
+      metalness: 0.35,
+    });
+    this.helperArrowGeo1 = new THREE.BoxGeometry(0.42, 0.28, 1.15);
+    this.helperArrowGeo1.translate(0, 0, 0.28);
+    const arrowShaft = new THREE.Mesh(this.helperArrowGeo1, this.helperArrowMat);
+    this.helperArrowGroup.add(arrowShaft);
+
+    this.helperArrowGeo2 = new THREE.ConeGeometry(0.62, 0.92, 4);
+    this.helperArrowGeo2.rotateY(Math.PI / 4);
+    this.helperArrowGeo2.rotateX(-Math.PI / 2);
+    this.helperArrowGeo2.translate(0, 0, -0.68);
+    const arrowTip = new THREE.Mesh(this.helperArrowGeo2, this.helperArrowMat);
+    this.helperArrowGroup.add(arrowTip);
+
+    this.helperArrowGroup.visible = false;
+    this.scene.add(this.helperArrowGroup);
 
     // Initial camera placement behind the scaled monster truck
     this.camera.position.set(0, this.pos.y + 5.0, this.pos.z + 11.0);
@@ -428,9 +569,27 @@ export class MonsterTruckGameEngine {
     this.recenterCamera();
   }
 
+  public setHelperMode(enabled: boolean): void {
+    this.helperMode = enabled;
+    this.emitHud();
+  }
+
+  public toggleHelperMode(): void {
+    this.setHelperMode(!this.helperMode);
+  }
+
   public honk(): void {
     this.audio.playHorn();
     this.chassisBounceVel += 2.2;
+    const reacted = this.worldProps.reactAnimalsToTruck(this.pos.x, this.pos.z, true);
+    if (reacted) {
+      this.audio.playAnimalChirp(reacted);
+    }
+  }
+
+  public dismissCelebration(): void {
+    this.celebrating = false;
+    this.emitHud();
   }
 
   public resetTruck(): void {
@@ -454,6 +613,9 @@ export class MonsterTruckGameEngine {
     this.airTime = 0;
     this.peakFallVel = 0;
     this.prevAvgGroundY = spot.y;
+    this.celebrating = false;
+    this.celebrationTriggered = false;
+    this.fireworkShowTimer = 0;
     this.recenterCamera();
 
     // Randomize all star locations on reset too
@@ -462,19 +624,94 @@ export class MonsterTruckGameEngine {
     this.emitHud();
   }
 
-  private emitParticle(x: number, y: number, z: number, isWater: boolean): void {
+  private emitParticle(
+    x: number,
+    y: number,
+    z: number,
+    isWater: boolean,
+    vyBoost = 0,
+    spread = 2.4,
+    r?: number,
+    g?: number,
+    b?: number
+  ): void {
     const p = this.particles[this.particleCursor];
     this.particleCursor = (this.particleCursor + 1) % this.PARTICLE_MAX;
     p.active = true;
-    p.x = x + (Math.random() - 0.5) * 0.55;
+    p.x = x + (Math.random() - 0.5) * 0.6;
     p.y = y + 0.16;
-    p.z = z + (Math.random() - 0.5) * 0.55;
-    p.vx = (Math.random() - 0.5) * 2.1;
-    p.vy = isWater ? 2.4 + Math.random() * 2.1 : 0.8 + Math.random() * 1.2;
-    p.vz = (Math.random() - 0.5) * 2.1;
+    p.z = z + (Math.random() - 0.5) * 0.6;
+    p.vx = (Math.random() - 0.5) * spread;
+    p.vy = (isWater ? 2.8 + Math.random() * 2.6 : 0.9 + Math.random() * 1.4) + vyBoost;
+    p.vz = (Math.random() - 0.5) * spread;
     p.life = 0;
-    p.maxLife = isWater ? 0.52 + Math.random() * 0.25 : 0.62 + Math.random() * 0.35;
+    p.maxLife = isWater ? 0.58 + Math.random() * 0.28 : 0.62 + Math.random() * 0.35;
     p.isWater = isWater;
+    if (r !== undefined && g !== undefined && b !== undefined) {
+      p.r = r;
+      p.g = g;
+      p.b = b;
+    } else if (isWater) {
+      p.r = 0.78;
+      p.g = 0.95;
+      p.b = 1.0;
+    } else {
+      p.r = 0.78;
+      p.g = 0.68;
+      p.b = 0.52;
+    }
+  }
+
+  private spawnWaterRipple(x: number, z: number, maxScale = 4.5): void {
+    const r = this.ripples[this.rippleCursor];
+    this.rippleCursor = (this.rippleCursor + 1) % this.ripples.length;
+    r.active = true;
+    r.life = 0;
+    r.maxLife = 0.85 + Math.random() * 0.25;
+    r.maxScale = maxScale;
+    r.mesh.position.set(x, WATER_LEVEL + 0.05, z);
+    r.mesh.scale.setScalar(0.8);
+    r.mesh.visible = true;
+    r.mat.opacity = 0.78;
+  }
+
+  private launchFireworkBurst(): void {
+    const sinY = Math.sin(this.yaw);
+    const cosY = Math.cos(this.yaw);
+    const aheadX = this.pos.x - sinY * (14 + Math.random() * 18) + (Math.random() - 0.5) * 26;
+    const aheadZ = this.pos.z - cosY * (14 + Math.random() * 18) + (Math.random() - 0.5) * 26;
+    const burstY = this.pos.y + 16 + Math.random() * 10;
+
+    const palette: [number, number, number][] = [
+      [1.0, 0.85, 0.2],
+      [1.0, 0.28, 0.62],
+      [0.25, 0.92, 1.0],
+      [0.45, 1.0, 0.35],
+      [1.0, 0.52, 0.18],
+      [0.75, 0.52, 1.0],
+    ];
+    const [r, g, b] = palette[Math.floor(Math.random() * palette.length)];
+
+    for (let i = 0; i < 36; i++) {
+      const fw = this.fireworks[this.fireworkCursor];
+      this.fireworkCursor = (this.fireworkCursor + 1) % this.FIREWORK_MAX;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const spd = 7 + Math.random() * 9;
+      fw.active = true;
+      fw.x = aheadX;
+      fw.y = burstY;
+      fw.z = aheadZ;
+      fw.vx = Math.sin(phi) * Math.cos(theta) * spd;
+      fw.vy = Math.cos(phi) * spd + 2.5;
+      fw.vz = Math.sin(phi) * Math.sin(theta) * spd;
+      fw.life = 0;
+      fw.maxLife = 1.05 + Math.random() * 0.45;
+      fw.r = r;
+      fw.g = g;
+      fw.b = b;
+    }
+    this.audio.playFireworkBurst();
   }
 
   private updateParticles(dt: number): void {
@@ -487,7 +724,7 @@ export class MonsterTruckGameEngine {
         this.particlePositions[i * 3 + 1] = -999;
         continue;
       }
-      p.vy -= (p.isWater ? 9.8 : 1.2) * dt;
+      p.vy -= (p.isWater ? 11.2 : 1.4) * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
@@ -495,18 +732,63 @@ export class MonsterTruckGameEngine {
       this.particlePositions[i * 3] = p.x;
       this.particlePositions[i * 3 + 1] = p.y;
       this.particlePositions[i * 3 + 2] = p.z;
-      if (p.isWater) {
-        this.particleColors[i * 3] = 0.78 * fade;
-        this.particleColors[i * 3 + 1] = 0.94 * fade;
-        this.particleColors[i * 3 + 2] = 1.0 * fade;
-      } else {
-        this.particleColors[i * 3] = 0.78 * fade;
-        this.particleColors[i * 3 + 1] = 0.68 * fade;
-        this.particleColors[i * 3 + 2] = 0.52 * fade;
-      }
+      this.particleColors[i * 3] = p.r * fade;
+      this.particleColors[i * 3 + 1] = p.g * fade;
+      this.particleColors[i * 3 + 2] = p.b * fade;
     }
     this.particleGeo.attributes.position.needsUpdate = true;
     this.particleGeo.attributes.color.needsUpdate = true;
+
+    // Update water ripples
+    for (let i = 0; i < this.ripples.length; i++) {
+      const r = this.ripples[i];
+      if (!r.active) continue;
+      r.life += dt;
+      if (r.life >= r.maxLife) {
+        r.active = false;
+        r.mesh.visible = false;
+        continue;
+      }
+      const t = r.life / r.maxLife;
+      const s = 0.8 + t * (r.maxScale - 0.8);
+      r.mesh.scale.setScalar(s);
+      r.mat.opacity = (1 - t) * 0.72;
+    }
+
+    // Update celebratory fireworks
+    if (this.fireworkShowTimer > 0) {
+      this.fireworkShowTimer -= dt;
+      this.fireworkBurstTimer -= dt;
+      if (this.fireworkBurstTimer <= 0) {
+        this.fireworkBurstTimer = 0.58 + Math.random() * 0.25;
+        this.launchFireworkBurst();
+      }
+    }
+    for (let i = 0; i < this.FIREWORK_MAX; i++) {
+      const fw = this.fireworks[i];
+      if (!fw.active) continue;
+      fw.life += dt;
+      if (fw.life >= fw.maxLife) {
+        fw.active = false;
+        this.fireworkPositions[i * 3 + 1] = -999;
+        continue;
+      }
+      fw.vx *= Math.exp(-1.1 * dt);
+      fw.vz *= Math.exp(-1.1 * dt);
+      fw.vy -= 7.2 * dt;
+      fw.x += fw.vx * dt;
+      fw.y += fw.vy * dt;
+      fw.z += fw.vz * dt;
+      const fade = 1 - fw.life / fw.maxLife;
+      this.fireworkPositions[i * 3] = fw.x;
+      this.fireworkPositions[i * 3 + 1] = fw.y;
+      this.fireworkPositions[i * 3 + 2] = fw.z;
+      this.fireworkColors[i * 3] = fw.r * fade;
+      this.fireworkColors[i * 3 + 1] = fw.g * fade;
+      this.fireworkColors[i * 3 + 2] = fw.b * fade;
+    }
+    this.fireworkGeo.attributes.position.needsUpdate = true;
+    this.fireworkGeo.attributes.color.needsUpdate = true;
   }
 
   private updatePhysics(dt: number): void {
@@ -631,22 +913,44 @@ export class MonsterTruckGameEngine {
       this.pos.x += nFx * this.speed * subDt;
       this.pos.z += nFz * this.speed * subDt;
 
-      // Gentle tree/boulder deflection
-      const truckRadius = 2.0 * TRUCK_SCALE;
+      // Solid tree & boulder collision (2 passes + inward velocity cancellation)
+      const truckRadius = 2.15 * TRUCK_SCALE;
       const obs = this.worldProps.obstacles;
-      for (let i = 0; i < obs.length; i++) {
-        const o = obs[i];
-        const dx = this.pos.x - o.x;
-        const dz = this.pos.z - o.z;
-        const minD = truckRadius + o.radius;
-        const distSq = dx * dx + dz * dz;
-        if (distSq < minD * minD && distSq > 0.0001) {
-          const dist = Math.sqrt(distSq);
-          const push = minD - dist;
-          this.pos.x += (dx / dist) * push;
-          this.pos.z += (dz / dist) * push;
-          this.speed *= 0.94;
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < obs.length; i++) {
+          const o = obs[i];
+          const dx = this.pos.x - o.x;
+          const dz = this.pos.z - o.z;
+          const minD = truckRadius + o.radius;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < minD * minD && distSq > 0.0001) {
+            const dist = Math.sqrt(distSq);
+            const nx = dx / dist;
+            const nz = dz / dist;
+            const push = minD - dist;
+            this.pos.x += nx * push;
+            this.pos.z += nz * push;
+
+            if (pass === 0) {
+              const vx = nFx * this.speed;
+              const vz = nFz * this.speed;
+              const inwardDot = vx * nx + vz * nz;
+              if (inwardDot < 0) {
+                const absSpd = Math.max(0.5, Math.abs(this.speed));
+                const headOn = Math.min(1, -inwardDot / absSpd);
+                this.speed *= 1 - headOn * 0.72;
+                if (-inwardDot > 8.5) {
+                  this.chassisBounceVel -= 1.6;
+                }
+              }
+            }
+          }
         }
+      }
+
+      // Water hydrodynamic resistance when submerged in creek/lake
+      if (this.wasInWater) {
+        this.speed *= Math.exp(-0.95 * subDt);
       }
 
       // Soft valley perimeter turn-in
@@ -857,34 +1161,96 @@ export class MonsterTruckGameEngine {
     );
     this.rpm = THREE.MathUtils.damp(this.rpm, targetRpm, 9.5, dt);
 
-    // Creek splash & dust particles
+    // Water entry splash, expanding ripples & 4-wheel wake plumes vs dry dust
     const baseTerrainY = groundHeightAt(this.pos.x, this.pos.z);
-    const inWater = groundedCount > 0 && baseTerrainY < WATER_LEVEL + 0.05 && this.pos.y < WATER_LEVEL + 0.4;
-    if (inWater && !this.wasInWater && absSpeed > 3.5) {
-      this.audio.playSplash();
+    const inWater = groundedCount > 0 && baseTerrainY < WATER_LEVEL + 0.04 && this.pos.y < WATER_LEVEL + 0.35;
+    const sinY = Math.sin(this.yaw);
+    const cosY = Math.cos(this.yaw);
+    const fx = -sinY;
+    const fz = -cosY;
+    const rx = cosY;
+    const rz = -sinY;
+
+    if (inWater && !this.wasInWater) {
+      this.audio.playSplash(Math.min(1.35, 0.7 + absSpeed * 0.04));
+      this.chassisBounceVel -= Math.min(3.5, 1.2 + absSpeed * 0.12);
+      this.spawnWaterRipple(this.pos.x, this.pos.z, 6.2);
+      this.spawnWaterRipple(this.pos.x + fx * 1.1, this.pos.z + fz * 1.1, 4.4);
+      for (let s = 0; s < 18; s++) {
+        const angle = (s / 18) * Math.PI * 2;
+        this.emitParticle(
+          this.pos.x + Math.cos(angle) * 1.4,
+          WATER_LEVEL + 0.1,
+          this.pos.z + Math.sin(angle) * 1.4,
+          true,
+          2.2 + Math.random() * 1.8,
+          6.2
+        );
+      }
     }
     this.wasInWater = inWater;
 
+    this.waterRippleTimer += dt;
+    if (inWater && absSpeed > 1.2 && this.waterRippleTimer > 0.15) {
+      this.waterRippleTimer = 0;
+      this.spawnWaterRipple(this.pos.x, this.pos.z, 3.8 + Math.min(2.2, absSpeed * 0.1));
+      this.chassisBounceVel += Math.sin(this.clock.elapsedTime * 9) * 0.35;
+    }
+
     this.particleEmitTimer += dt;
-    if (groundedCount > 0 && absSpeed > 3.5 && this.particleEmitTimer > 0.045) {
+    if (groundedCount > 0 && absSpeed > (inWater ? 1.2 : 3.5) && this.particleEmitTimer > (inWater ? 0.036 : 0.045)) {
       this.particleEmitTimer = 0;
-      const sinY = Math.sin(this.yaw);
-      const cosY = Math.cos(this.yaw);
-      const fx = -sinY;
-      const fz = -cosY;
-      const rx = cosY;
-      const rz = -sinY;
       const rearDist = 1.8 * TRUCK_SCALE;
       const sideDist = 1.5 * TRUCK_SCALE;
       const rearLx = this.pos.x - fx * rearDist - rx * sideDist;
       const rearLz = this.pos.z - fz * rearDist - rz * sideDist;
       const rearRx = this.pos.x - fx * rearDist + rx * sideDist;
       const rearRz = this.pos.z - fz * rearDist + rz * sideDist;
-      this.emitParticle(rearLx, this.pos.y + 0.15, rearLz, inWater);
-      this.emitParticle(rearRx, this.pos.y + 0.15, rearRz, inWater);
+      this.emitParticle(rearLx, this.pos.y + 0.18, rearLz, inWater, inWater ? 1.1 : 0, inWater ? 3.8 : 2.2);
+      this.emitParticle(rearRx, this.pos.y + 0.18, rearRz, inWater, inWater ? 1.1 : 0, inWater ? 3.8 : 2.2);
+      if (inWater) {
+        const frontLx = this.pos.x + fx * rearDist - rx * sideDist;
+        const frontLz = this.pos.z + fz * rearDist - rz * sideDist;
+        const frontRx = this.pos.x + fx * rearDist + rx * sideDist;
+        const frontRz = this.pos.z + fz * rearDist + rz * sideDist;
+        this.emitParticle(frontLx, WATER_LEVEL + 0.12, frontLz, true, 1.5, 4.4);
+        this.emitParticle(frontRx, WATER_LEVEL + 0.12, frontRz, true, 1.5, 4.4);
+      }
     }
 
-    // Collect Golden Pine Stars
+    // Smashable Props (crates, hay bales, traffic cones)
+    const smashables = this.worldProps.smashables;
+    const hitRadius = 2.1 * TRUCK_SCALE;
+    for (let i = 0; i < smashables.length; i++) {
+      const sp = smashables[i];
+      if (sp.smashed) continue;
+      const dx = sp.x - this.pos.x;
+      const dz = sp.z - this.pos.z;
+      const minD = hitRadius + sp.radius;
+      if (dx * dx + dz * dz < minD * minD && Math.abs(this.pos.y - sp.y) < 2.6) {
+        this.worldProps.smashProp(sp, fx * this.speed, fz * this.speed);
+        this.audio.playPropSmash();
+        this.speed *= 0.985;
+        this.chassisBounceVel += 0.9;
+        const [pr, pg, pb] =
+          sp.kind === 'cone' ? [1.0, 0.48, 0.12] : sp.kind === 'hay' ? [0.96, 0.78, 0.18] : [0.88, 0.62, 0.3];
+        for (let k = 0; k < 8; k++) {
+          this.emitParticle(sp.x, sp.y + 0.5, sp.z, false, 2.2, 5.2, pr, pg, pb);
+        }
+      }
+    }
+
+    // Forest Animal Proximity Reactions
+    this.animalCheckTimer += dt;
+    if (this.animalCheckTimer >= 0.25) {
+      this.animalCheckTimer = 0;
+      const nearAnimal = this.worldProps.reactAnimalsToTruck(this.pos.x, this.pos.z, false);
+      if (nearAnimal) {
+        this.audio.playAnimalChirp(nearAnimal);
+      }
+    }
+
+    // Collect Golden Pine Stars & Trigger Fireworks Celebration
     const stars = this.worldProps.stars;
     for (let i = 0; i < stars.length; i++) {
       const st = stars[i];
@@ -896,6 +1262,13 @@ export class MonsterTruckGameEngine {
         this.starsCollected++;
         this.audio.playStarChime();
         this.chassisBounceVel += 1.6;
+        if (this.starsCollected >= stars.length && !this.celebrationTriggered) {
+          this.celebrationTriggered = true;
+          this.celebrating = true;
+          this.fireworkShowTimer = 9.5;
+          this.fireworkBurstTimer = 0.05;
+          this.audio.playCelebrationFanfare();
+        }
         this.emitHud();
       }
     }
@@ -974,6 +1347,13 @@ export class MonsterTruckGameEngine {
   }
 
   private emitHud(): void {
+    const uncollectedStars: { x: number; z: number }[] = [];
+    for (let i = 0; i < this.worldProps.stars.length; i++) {
+      const st = this.worldProps.stars[i];
+      if (!st.collected) {
+        uncollectedStars.push({ x: st.x, z: st.z });
+      }
+    }
     this.onHudUpdate({
       speedKmh: Math.round(Math.abs(this.speed) * 2.8),
       rpm: Math.round(this.rpm),
@@ -984,6 +1364,12 @@ export class MonsterTruckGameEngine {
       inWater: this.wasInWater,
       airborne: this.airborne,
       webglLost: this.webglLost,
+      truckX: this.pos.x,
+      truckZ: this.pos.z,
+      truckYaw: this.yaw,
+      uncollectedStars,
+      celebrating: this.celebrating,
+      helperMode: this.helperMode,
     });
   }
 
@@ -1028,8 +1414,49 @@ export class MonsterTruckGameEngine {
 
     this.updatePhysics(dt);
     this.updateParticles(dt);
-    this.worldProps.update(elapsed, dt, this.timeOfDay === 'starlight');
+    this.worldProps.update(elapsed, dt, this.timeOfDay === 'starlight', this.helperMode);
+
+    // Update 3D floating guide arrow when Helper Mode is active
+    if (this.helperMode) {
+      let nearestDistSq = Infinity;
+      let nearestX = 0;
+      let nearestZ = 0;
+      let foundStar = false;
+      const stars = this.worldProps.stars;
+      for (let i = 0; i < stars.length; i++) {
+        const st = stars[i];
+        if (st.collected) continue;
+        const dx = st.x - this.pos.x;
+        const dz = st.z - this.pos.z;
+        const dSq = dx * dx + dz * dz;
+        if (dSq < nearestDistSq) {
+          nearestDistSq = dSq;
+          nearestX = st.x;
+          nearestZ = st.z;
+          foundStar = true;
+        }
+      }
+      if (foundStar) {
+        this.helperArrowGroup.visible = true;
+        const targetYaw = Math.atan2(-(nearestX - this.pos.x), -(nearestZ - this.pos.z));
+        const delta = ((targetYaw - this.helperArrowYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        this.helperArrowYaw += delta * (1 - Math.exp(-10 * dt));
+        this.helperArrowGroup.position.set(
+          this.pos.x,
+          this.pos.y + 2.85 + Math.sin(elapsed * 4.2) * 0.14,
+          this.pos.z
+        );
+        this.helperArrowGroup.rotation.set(0, this.helperArrowYaw, 0);
+      } else {
+        this.helperArrowGroup.visible = false;
+      }
+    } else {
+      this.helperArrowGroup.visible = false;
+    }
+
     this.terrainRig.waterMesh.position.y = WATER_LEVEL + Math.sin(elapsed * 1.8) * 0.035;
+    this.textures.waterRippleMap.offset.x = (this.textures.waterRippleMap.offset.x + dt * 0.06) % 1;
+    this.textures.waterRippleMap.offset.y = (this.textures.waterRippleMap.offset.y + dt * 0.035) % 1;
     this.updateCamera(dt);
 
     this.hudTimer += dt;
@@ -1067,6 +1494,13 @@ export class MonsterTruckGameEngine {
     this.textures.dispose();
     this.particleGeo.dispose();
     this.particleMat.dispose();
+    this.rippleGeo.dispose();
+    this.ripples.forEach((r) => r.mat.dispose());
+    this.fireworkGeo.dispose();
+    this.fireworkMat.dispose();
+    this.helperArrowGeo1.dispose();
+    this.helperArrowGeo2.dispose();
+    this.helperArrowMat.dispose();
     this.envRT.dispose();
     this.renderer.dispose();
 

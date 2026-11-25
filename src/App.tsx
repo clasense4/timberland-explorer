@@ -17,6 +17,7 @@ export default function App() {
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('morning');
   const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
   const [muted, setMuted] = useState(false);
+  const [bigMapOpen, setBigMapOpen] = useState(false);
   const [hud, setHud] = useState<HudSnapshot>({
     speedKmh: 0,
     rpm: 850,
@@ -27,6 +28,12 @@ export default function App() {
     inWater: false,
     airborne: false,
     webglLost: false,
+    truckX: 0,
+    truckZ: 8,
+    truckYaw: 0,
+    uncollectedStars: [],
+    celebrating: false,
+    helperMode: false,
   });
 
   useEffect(() => {
@@ -58,6 +65,9 @@ export default function App() {
       if (down && !e.repeat) {
         if (code === 'KeyH') engine.honk();
         if (code === 'KeyR') engine.resetTruck();
+        if (code === 'KeyG') engine.toggleHelperMode();
+        if (code === 'KeyM') setBigMapOpen((prev) => !prev);
+        if (code === 'Escape') setBigMapOpen(false);
       }
     };
 
@@ -111,12 +121,20 @@ export default function App() {
     });
   }, []);
 
+  const handleToggleHelper = useCallback(() => {
+    engineRef.current?.toggleHelperMode();
+  }, []);
+
   const handleHonk = useCallback(() => {
     engineRef.current?.honk();
   }, []);
 
   const handleReset = useCallback(() => {
     engineRef.current?.resetTruck();
+  }, []);
+
+  const handleDismissCelebration = useCallback(() => {
+    engineRef.current?.dismissCelebration();
   }, []);
 
   const handleVirtualInput = useCallback((key: keyof InputState, down: boolean) => {
@@ -154,13 +172,17 @@ export default function App() {
         timeOfDay={timeOfDay}
         cameraMode={cameraMode}
         muted={muted}
+        bigMapOpen={bigMapOpen}
         onSelectColor={handleSelectColor}
         onSelectTimeOfDay={handleSelectTime}
         onSelectCamera={handleSelectCamera}
         onRecenterCamera={handleRecenterCamera}
         onToggleMute={handleToggleMute}
+        onToggleHelper={handleToggleHelper}
+        onSetBigMapOpen={setBigMapOpen}
         onHonk={handleHonk}
         onReset={handleReset}
+        onDismissCelebration={handleDismissCelebration}
         onVirtualInput={handleVirtualInput}
       />
     </main>

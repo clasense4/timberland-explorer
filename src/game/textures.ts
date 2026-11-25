@@ -5,6 +5,7 @@ export interface ProceduralTextureSet {
   tireTreadMap: THREE.CanvasTexture;
   woodPlankMap: THREE.CanvasTexture;
   barkMap: THREE.CanvasTexture;
+  waterRippleMap: THREE.CanvasTexture;
   contactShadowMap: THREE.CanvasTexture;
   particleMap: THREE.CanvasTexture;
   dispose: () => void;
@@ -107,7 +108,32 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   barkMap.colorSpace = THREE.SRGBColorSpace;
   barkMap.anisotropy = maxAnisotropy;
 
-  // 5. Soft radial contact shadow beneath monster truck
+  // 5. Shimmering tileable alpine water ripple texture
+  const waterCanvas = document.createElement('canvas');
+  waterCanvas.width = 256;
+  waterCanvas.height = 256;
+  const waCtx = waterCanvas.getContext('2d')!;
+  waCtx.fillStyle = '#38a7c7';
+  waCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 90; i++) {
+    const cx = Math.random() * 256;
+    const cy = Math.random() * 256;
+    const rx = 14 + Math.random() * 28;
+    const ry = 4 + Math.random() * 8;
+    waCtx.strokeStyle = i % 3 === 0 ? 'rgba(224, 247, 255, 0.34)' : 'rgba(125, 226, 248, 0.25)';
+    waCtx.lineWidth = 2;
+    waCtx.beginPath();
+    waCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    waCtx.stroke();
+  }
+  const waterRippleMap = new THREE.CanvasTexture(waterCanvas);
+  waterRippleMap.wrapS = THREE.RepeatWrapping;
+  waterRippleMap.wrapT = THREE.RepeatWrapping;
+  waterRippleMap.repeat.set(38, 38);
+  waterRippleMap.colorSpace = THREE.SRGBColorSpace;
+  waterRippleMap.anisotropy = maxAnisotropy;
+
+  // 6. Soft radial contact shadow beneath monster truck
   const shadowCanvas = document.createElement('canvas');
   shadowCanvas.width = 128;
   shadowCanvas.height = 128;
@@ -121,7 +147,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const contactShadowMap = new THREE.CanvasTexture(shadowCanvas);
   contactShadowMap.colorSpace = THREE.SRGBColorSpace;
 
-  // 6. Soft dust / water splash particle sprite
+  // 7. Soft dust / water splash particle sprite
   const partCanvas = document.createElement('canvas');
   partCanvas.width = 64;
   partCanvas.height = 64;
@@ -140,6 +166,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     tireTreadMap,
     woodPlankMap,
     barkMap,
+    waterRippleMap,
     contactShadowMap,
     particleMap,
     dispose: () => {
@@ -147,6 +174,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       tireTreadMap.dispose();
       woodPlankMap.dispose();
       barkMap.dispose();
+      waterRippleMap.dispose();
       contactShadowMap.dispose();
       particleMap.dispose();
     },

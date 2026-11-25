@@ -37,6 +37,12 @@ export interface HudSnapshot {
   inWater: boolean;
   airborne: boolean;
   webglLost: boolean;
+  truckX: number;
+  truckZ: number;
+  truckYaw: number;
+  uncollectedStars: { x: number; z: number }[];
+  celebrating: boolean;
+  helperMode: boolean;
 }
 
 export interface RampSpec {

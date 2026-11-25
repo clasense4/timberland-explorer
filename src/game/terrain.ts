@@ -37,10 +37,10 @@ export function creekSignedDistance(x: number, z: number): number {
   const curveZ = -88 + Math.sin(x * 0.014) * 32 + Math.cos(x * 0.028) * 11;
   const dMain = Math.abs(z - curveZ);
   // Alpine lake near (64, -74)
-  const pondDist = Math.hypot(x - 64, z + 74) - 22;
+  const pondDist = Math.hypot(x - 64, z + 74) - 24;
   // Second mountain tarn near (-145, -108)
-  const tarnDist = Math.hypot(x + 145, z + 108) - 18;
-  return Math.min(dMain, pondDist + 8, tarnDist + 8);
+  const tarnDist = Math.hypot(x + 145, z + 108) - 20;
+  return Math.min(dMain, pondDist + 6, tarnDist + 6);
 }
 
 /**
@@ -112,12 +112,15 @@ export function groundHeightAt(x: number, z: number): number {
     cedarSummit +
     mountainRim;
 
-  // Carve gentle creek bed & alpine ponds
+  // Keep open meadows gently above water level outside the carved creek & alpine lakes
+  h = Math.max(0.22, h);
+
+  // Carve gentle creek bed & alpine ponds cleanly below WATER_LEVEL
   const creekD = creekSignedDistance(x, z);
-  const creekCarve = 1 - smoothstep(6.0, 16.5, creekD);
+  const creekCarve = 1 - smoothstep(6.5, 17.5, creekD);
   if (creekCarve > 0) {
-    const targetBed = -1.2;
-    h = THREE.MathUtils.lerp(h, Math.min(h, targetBed), creekCarve);
+    const targetBed = -1.35;
+    h = THREE.MathUtils.lerp(h, targetBed, creekCarve);
   }
 
   return h;
@@ -267,20 +270,22 @@ export function createTerrainAndWater(textures: ProceduralTextureSet): {
   terrainMesh.receiveShadow = true;
   group.add(terrainMesh);
 
-  // Expanded creek water surface across the larger valley
-  const waterGeo = new THREE.PlaneGeometry(820, 260, 64, 32);
+  // Full-valley water plane so every creek bend and alpine lake always has shimmering water
+  const waterGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 96, 96);
   waterGeo.rotateX(-Math.PI / 2);
   const waterMat = new THREE.MeshPhysicalMaterial({
-    color: 0x3ba6c4,
-    roughness: 0.14,
-    metalness: 0.08,
-    clearcoat: 0.9,
-    clearcoatRoughness: 0.12,
+    color: 0x52c2e0,
+    map: textures.waterRippleMap,
+    roughness: 0.16,
+    metalness: 0.06,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.14,
     transparent: true,
-    opacity: 0.78,
+    opacity: 0.8,
+    side: THREE.DoubleSide,
   });
   const waterMesh = new THREE.Mesh(waterGeo, waterMat);
-  waterMesh.position.set(0, WATER_LEVEL, -88);
+  waterMesh.position.set(0, WATER_LEVEL, 0);
   waterMesh.receiveShadow = true;
   group.add(waterMesh);
 
